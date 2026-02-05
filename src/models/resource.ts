@@ -59,4 +59,5 @@ export interface SummaryWithResources {
   summary: string;
   keyPoints: string[];
   resources: ExtractedResource[];
+  articleTags?: string[];
 }

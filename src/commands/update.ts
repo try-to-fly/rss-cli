@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { rssService } from '../services/rss.js';
 import { cacheService } from '../services/cache.js';
+import { exportRecentArticles, EXPORTS_DIR } from '../services/export.js';
 import { logger } from '../utils/logger.js';
 
 export function createUpdateCommand(): Command {
@@ -62,6 +63,11 @@ export function createUpdateCommand(): Command {
         console.log();
         if (totalNew > 0) {
           logger.success(`Total: ${totalNew} new articles`);
+
+          // 导出文章数据
+          const exportSpinner = ora('Exporting articles...').start();
+          const exportCount = exportRecentArticles(7);
+          exportSpinner.succeed(`Exported ${exportCount} articles to ${EXPORTS_DIR}`);
         } else {
           logger.info('No new articles found');
         }

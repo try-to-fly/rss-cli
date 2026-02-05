@@ -9,6 +9,7 @@ import { createSearchCommand, createShowCommand, createDigestCommand } from './c
 import { createConfigCommand, createPrefCommand } from './commands/config.js';
 import { createRunCommand } from './commands/run.js';
 import { createResourceCommand } from './commands/resource.js';
+import { createTagCommand } from './commands/tag.js';
 import { closeDb } from './db/index.js';
 
 const program = new Command();
@@ -29,6 +30,7 @@ program.addCommand(createConfigCommand());
 program.addCommand(createPrefCommand());
 program.addCommand(createRunCommand());
 program.addCommand(createResourceCommand());
+program.addCommand(createTagCommand());
 
 // Handle errors
 program.exitOverride();

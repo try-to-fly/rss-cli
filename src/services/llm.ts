@@ -1,6 +1,19 @@
 import { cacheService } from './cache.js';
+import { convert } from 'html-to-text';
 import type { Article } from '../models/article.js';
 import type { SummaryWithResources, ExtractedResource, Resource, ResourceInput } from '../models/resource.js';
+
+// HTML 转纯文本
+function htmlToPlainText(html: string): string {
+  if (!html) return '';
+  return convert(html, {
+    wordwrap: false,
+    selectors: [
+      { selector: 'a', options: { ignoreHref: true } },
+      { selector: 'img', format: 'skip' },
+    ],
+  });
+}
 
 // 直接从环境变量读取 LLM 配置
 function getLlmConfig() {
@@ -318,12 +331,12 @@ ${article.content || '(无内容)'}
 注意：这是一篇技术周刊/Newsletter，通常包含大量技术资源。请尽可能完整地提取所有提到的工具、库、项目等资源。`
       : '';
 
-    // Limit content length to avoid very long requests
+    // 优先使用纯文本快照，否则使用原始内容
     const maxContentLength = 8000;
-    const articleContent = article.content || '(无内容)';
-    const truncatedContent = articleContent.length > maxContentLength
-      ? articleContent.slice(0, maxContentLength) + '...(内容已截断)'
-      : articleContent;
+    const rawContent = article.text_snapshot || article.content || '(无内容)';
+    const truncatedContent = rawContent.length > maxContentLength
+      ? rawContent.slice(0, maxContentLength) + '...(内容已截断)'
+      : rawContent;
 
     const prompt = `请分析以下技术文章，生成摘要并提取其中提到的技术资源。
 ${newsletterNote}
@@ -337,6 +350,7 @@ ${truncatedContent}
 {
   "summary": "文章摘要（100-200字，中文）",
   "keyPoints": ["关键点1", "关键点2", ...],  // 3-5个关键点
+  "articleTags": ["标签1", "标签2", ...],  // 3-8个文章标签，用于分类和检索
   "resources": [
     {
       "name": "资源名称",
@@ -350,6 +364,11 @@ ${truncatedContent}
     }
   ]
 }
+
+文章标签说明（articleTags）：
+- 提取3-8个能代表文章主题的标签
+- 标签应该是小写英文，如: javascript, react, ai, devops, performance
+- 包含技术领域、编程语言、框架、主题等
 
 资源类型说明：
 - tool: 开发工具（IDE、CLI工具、构建工具等）
@@ -378,6 +397,7 @@ ${truncatedContent}
         summary: parsed.summary || '无法生成摘要',
         keyPoints: parsed.keyPoints || [],
         resources: parsed.resources || [],
+        articleTags: parsed.articleTags || [],
       };
     } catch (error) {
       console.error('[LLM] Parse summarize error:', (error as Error).message);
@@ -385,6 +405,7 @@ ${truncatedContent}
         summary: '无法解析摘要',
         keyPoints: [],
         resources: [],
+        articleTags: [],
       };
     }
   }
@@ -395,6 +416,15 @@ ${truncatedContent}
     onProgress?: ProgressCallback
   ): Promise<AnalysisResult[]> {
     const tokenUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
+    // 为所有文章生成并保存纯文本快照（如果还没有）
+    for (const article of articles) {
+      if (!article.text_snapshot && article.content) {
+        const plainText = htmlToPlainText(article.content);
+        cacheService.saveArticleSnapshot(article.id, plainText);
+        article.text_snapshot = plainText;
+      }
+    }
 
     // First, filter articles
     const filterResults = await this.filterArticles(articles, onProgress, tokenUsage);
@@ -430,6 +460,19 @@ ${truncatedContent}
           summary = result.summary;
           resources = result.resources;
 
+          // 保存文章标签
+          if (result.articleTags && result.articleTags.length > 0) {
+            for (const tagName of result.articleTags) {
+              const tag = cacheService.getOrCreateTag(tagName, 'topic');
+              cacheService.linkArticleTag({
+                article_id: article.id,
+                tag_id: tag.id,
+                source: 'llm',
+                confidence: 1.0,
+              });
+            }
+          }
+
           // Save resources to database with smart description merging
           for (const res of result.resources) {
             const savedResource = await this.addOrUpdateResourceWithMerge({
@@ -447,6 +490,14 @@ ${truncatedContent}
               context: res.context,
               relevance: res.relevance,
             });
+
+            // 将资源的标签也保存到规范化的 resource_tags 表
+            if (res.tags && res.tags.length > 0) {
+              for (const tagName of res.tags) {
+                const tag = cacheService.getOrCreateTag(tagName, 'tech');
+                cacheService.linkResourceTag(savedResource.id, tag.id);
+              }
+            }
           }
         } catch (err) {
           console.error('[LLM Error]', (err as Error).message);

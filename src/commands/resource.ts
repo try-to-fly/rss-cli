@@ -56,12 +56,22 @@ export function createResourceCommand(): Command {
     .option('-d, --days <days>', '限制天数', parseInt)
     .option('-t, --type <type>', '资源类型 (tool|library|framework|project|service|other)')
     .option('-n, --limit <limit>', '显示数量', parseInt)
+    .option('--tag <tag>', '按标签筛选')
     .action((options) => {
-      const resources = cacheService.getHotResources({
-        days: options.days,
-        type: options.type,
-        limit: options.limit || 20,
-      });
+      let resources;
+
+      if (options.tag) {
+        resources = cacheService.getResourcesByTagName(options.tag, options.limit || 20);
+        if (options.type) {
+          resources = resources.filter(r => r.type === options.type);
+        }
+      } else {
+        resources = cacheService.getHotResources({
+          days: options.days,
+          type: options.type,
+          limit: options.limit || 20,
+        });
+      }
 
       if (resources.length === 0) {
         console.log(chalk.yellow('暂无资源数据'));

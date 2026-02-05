@@ -1,3 +1,5 @@
+import type { Tag } from './tag.js';
+
 export interface Article {
   id: number;
   feed_id: number;
@@ -11,6 +13,8 @@ export interface Article {
   interest_reason: string | null;
   summary: string | null;
   analyzed_at: string | null;
+  text_snapshot: string | null;
+  snapshot_at: string | null;
   created_at: string;
 }
 
@@ -26,4 +30,8 @@ export interface ArticleInput {
 export interface ArticleWithFeed extends Article {
   feed_name: string;
   feed_url: string;
+}
+
+export interface ArticleWithTags extends ArticleWithFeed {
+  tags: Tag[];
 }

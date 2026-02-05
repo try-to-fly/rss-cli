@@ -4,6 +4,7 @@ import ora from 'ora';
 import { rssService } from '../services/rss.js';
 import { llmService, type ProgressCallback } from '../services/llm.js';
 import { cacheService } from '../services/cache.js';
+import { exportAnalyzedArticles, EXPORTS_DIR } from '../services/export.js';
 import { logger } from '../utils/logger.js';
 
 export function createRunCommand(): Command {
@@ -125,8 +126,16 @@ export function createRunCommand(): Command {
           }
         }
 
-        // Step 3: Show interesting articles
+        // Step 3: Export analyzed articles
         const days = parseInt(options.days, 10);
+
+        if (!options.json) {
+          const exportSpinner = ora('Exporting articles...').start();
+          const exportCount = exportAnalyzedArticles(days);
+          exportSpinner.succeed(`Exported ${exportCount} articles to ${EXPORTS_DIR}`);
+        }
+
+        // Step 4: Show interesting articles
         const interestingArticles = cacheService.getArticles({
           interesting: true,
           days,

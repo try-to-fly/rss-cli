@@ -2,9 +2,9 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { cacheService } from '../services/cache.js';
 import { logger } from '../utils/logger.js';
-import type { ArticleWithFeed } from '../models/article.js';
+import type { ArticleWithFeed, ArticleWithTags } from '../models/article.js';
 
-function formatArticle(article: ArticleWithFeed, showContent = false): void {
+function formatArticle(article: ArticleWithFeed | ArticleWithTags, showContent = false): void {
   const date = article.pub_date
     ? new Date(article.pub_date).toLocaleDateString()
     : 'Unknown date';
@@ -29,6 +29,12 @@ function formatArticle(article: ArticleWithFeed, showContent = false): void {
 
   if (article.summary) {
     console.log(`       ${chalk.blue('摘要:')} ${article.summary}`);
+  }
+
+  // 显示标签
+  if ('tags' in article && article.tags && article.tags.length > 0) {
+    const tagNames = article.tags.map(t => chalk.cyan(`#${t.name}`)).join(' ');
+    console.log(`       ${chalk.gray('标签:')} ${tagNames}`);
   }
 
   if (showContent && article.content) {
@@ -158,14 +164,18 @@ export function createShowCommand(): Command {
     .option('-n, --not-interesting', 'Show only not interesting articles')
     .option('-d, --days <n>', 'Show articles from last N days')
     .option('-l, --limit <n>', 'Limit number of articles', '50')
+    .option('-t, --tag <tags>', 'Filter by tags (comma-separated)')
     .option('--json', 'Output as JSON')
     .action((options) => {
-      const articles = cacheService.getArticles({
+      const tags = options.tag ? options.tag.split(',').map((t: string) => t.trim()) : undefined;
+
+      const articles = cacheService.getArticlesWithTags({
         feedId: options.feed ? parseInt(options.feed, 10) : undefined,
         unread: options.unread,
         interesting: options.interesting ? true : options.notInteresting ? false : undefined,
         days: options.days ? parseInt(options.days, 10) : undefined,
         limit: parseInt(options.limit, 10),
+        tags,
       });
 
       if (options.json) {
