@@ -36,7 +36,6 @@ export class ProxyManager {
         'User-Agent': 'Mozilla/5.0 (compatible; RSS-CLI/1.0)',
         'Accept': 'application/rss+xml, application/xml, text/xml, */*',
       },
-      timeout: 30000,
     };
 
     if (mode === 'proxy' && this.proxyUrl) {

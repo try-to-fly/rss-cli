@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import 'dotenv/config';
 import { Command } from 'commander';
 import { createFeedCommand } from './commands/feed.js';
 import { createUpdateCommand } from './commands/update.js';
@@ -7,6 +8,7 @@ import { createSummaryCommand } from './commands/summary.js';
 import { createSearchCommand, createShowCommand, createDigestCommand } from './commands/search.js';
 import { createConfigCommand, createPrefCommand } from './commands/config.js';
 import { createRunCommand } from './commands/run.js';
+import { createResourceCommand } from './commands/resource.js';
 import { closeDb } from './db/index.js';
 
 const program = new Command();
@@ -26,6 +28,7 @@ program.addCommand(createDigestCommand());
 program.addCommand(createConfigCommand());
 program.addCommand(createPrefCommand());
 program.addCommand(createRunCommand());
+program.addCommand(createResourceCommand());
 
 // Handle errors
 program.exitOverride();

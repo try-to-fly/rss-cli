@@ -46,10 +46,41 @@ CREATE TABLE IF NOT EXISTS config (
   value TEXT NOT NULL
 );
 
+-- 技术资源表
+CREATE TABLE IF NOT EXISTS resources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,                    -- tool|library|framework|project|service|other
+  url TEXT,
+  github_url TEXT,
+  description TEXT,
+  tags TEXT,                             -- 标签（逗号分隔）
+  first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  mention_count INTEGER DEFAULT 1,
+  UNIQUE(name, type)
+);
+
+-- 文章-资源关联表
+CREATE TABLE IF NOT EXISTS article_resources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  article_id INTEGER NOT NULL,
+  resource_id INTEGER NOT NULL,
+  context TEXT,                          -- 提及上下文
+  relevance TEXT DEFAULT 'mentioned',    -- main|mentioned|compared
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(article_id, resource_id),
+  FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE,
+  FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE
+);
+
 -- 创建索引以提高查询性能
 CREATE INDEX IF NOT EXISTS idx_articles_feed_id ON articles(feed_id);
 CREATE INDEX IF NOT EXISTS idx_articles_pub_date ON articles(pub_date);
 CREATE INDEX IF NOT EXISTS idx_articles_is_interesting ON articles(is_interesting);
 CREATE INDEX IF NOT EXISTS idx_articles_analyzed_at ON articles(analyzed_at);
 CREATE INDEX IF NOT EXISTS idx_feeds_category ON feeds(category);
+CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type);
+CREATE INDEX IF NOT EXISTS idx_resources_mention_count ON resources(mention_count);
+CREATE INDEX IF NOT EXISTS idx_article_resources_article_id ON article_resources(article_id);
+CREATE INDEX IF NOT EXISTS idx_article_resources_resource_id ON article_resources(resource_id);
 `;

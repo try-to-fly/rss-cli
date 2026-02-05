@@ -3,7 +3,9 @@
     "allow": [
       "Bash(pnpm init)",
       "Bash(pnpm rss feed --help:*)",
-      "Bash(pnpm rss:*)"
+      "Bash(pnpm rss:*)",
+      "Bash(wc:*)",
+      "Bash(node:*)"
     ]
   }
 }

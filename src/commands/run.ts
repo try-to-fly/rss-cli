@@ -2,17 +2,16 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { rssService } from '../services/rss.js';
-import { llmService } from '../services/llm.js';
+import { llmService, type ProgressCallback } from '../services/llm.js';
 import { cacheService } from '../services/cache.js';
 import { logger } from '../utils/logger.js';
-import { getConfig } from '../utils/config.js';
-import { CONFIG_KEYS } from '../models/config.js';
 
 export function createRunCommand(): Command {
   const run = new Command('run')
     .description('Update feeds, analyze articles, and show interesting ones')
     .option('-d, --days <n>', 'Analyze articles from last N days', '3')
     .option('-s, --summary', 'Generate summaries for interesting articles')
+    .option('-f, --force', 'Force re-analyze all articles (ignore previous analysis)')
     .option('--skip-update', 'Skip feed update')
     .option('--skip-analyze', 'Skip LLM analysis')
     .option('--json', 'Output as JSON')
@@ -43,23 +42,78 @@ export function createRunCommand(): Command {
 
         // Step 2: Analyze with LLM (if configured)
         if (!options.skipAnalyze) {
-          const hasLlmKey = getConfig(CONFIG_KEYS.LLM_API_KEY);
+          const hasLlmKey = process.env.LLM_API_KEY;
 
           if (hasLlmKey) {
             const spinner = ora('Analyzing articles with LLM...').start();
             const days = parseInt(options.days, 10);
-            const articles = cacheService.getUnanalyzedArticles(undefined, days);
+
+            // Get articles to analyze
+            let articles;
+            if (options.force) {
+              // Force mode: get all articles from the period
+              articles = cacheService.getArticles({ days, limit: 500 });
+              spinner.text = `Force re-analyzing ${articles.length} articles...`;
+            } else {
+              // Normal mode: only unanalyzed articles
+              articles = cacheService.getUnanalyzedArticles(undefined, days);
+            }
 
             if (articles.length > 0) {
-              const analysisResults = await llmService.analyzeArticles(articles, options.summary);
-              const interestingCount = analysisResults.filter((r) => r.isInteresting).length;
-
-              results.analyzed = {
+              let lastProgress: { phase: string; current: number; total: number; title: string; tokens: number } = {
+                phase: 'filter',
+                current: 0,
                 total: articles.length,
-                interesting: interestingCount,
+                title: '',
+                tokens: 0,
+              };
+              const startTime = Date.now();
+
+              // Timer to show elapsed time
+              const updateSpinner = () => {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                const timeStr = `${elapsed}s`;
+                const tokenInfo = `[${lastProgress.tokens} tokens | ${timeStr}]`;
+
+                if (lastProgress.phase === 'filter') {
+                  spinner.text = `过滤文章中... ${tokenInfo}`;
+                } else {
+                  const title = lastProgress.title ? ` "${lastProgress.title}..."` : '';
+                  spinner.text = `摘要生成 (${lastProgress.current}/${lastProgress.total})${title} ${tokenInfo}`;
+                }
               };
 
-              spinner.succeed(`Analyzed ${articles.length} articles: ${interestingCount} interesting`);
+              const timer = setInterval(updateSpinner, 1000);
+
+              // Progress callback to update spinner
+              const onProgress: ProgressCallback = (progress) => {
+                lastProgress = {
+                  phase: progress.phase,
+                  current: progress.current,
+                  total: progress.total,
+                  title: progress.articleTitle?.slice(0, 40) || '',
+                  tokens: progress.tokens.totalTokens,
+                };
+                updateSpinner();
+              };
+
+              try {
+                const analysisResults = await llmService.analyzeArticles(
+                  articles,
+                  options.summary,
+                  onProgress
+                );
+                const interestingCount = analysisResults.filter((r) => r.isInteresting).length;
+
+                results.analyzed = {
+                  total: articles.length,
+                  interesting: interestingCount,
+                };
+
+                spinner.succeed(`Analyzed ${articles.length} articles: ${interestingCount} interesting`);
+              } finally {
+                clearInterval(timer);
+              }
             } else {
               spinner.info('No unanalyzed articles found');
               results.analyzed = { total: 0, interesting: 0 };

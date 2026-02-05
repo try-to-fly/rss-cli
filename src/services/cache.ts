@@ -2,6 +2,12 @@ import { getDb } from '../db/index.js';
 import type { Feed, FeedInput } from '../models/feed.js';
 import type { Article, ArticleInput, ArticleWithFeed } from '../models/article.js';
 import type { UserPreference } from '../models/config.js';
+import type {
+  Resource,
+  ResourceInput,
+  ArticleResourceInput,
+  ResourceWithStats,
+} from '../models/resource.js';
 
 export class CacheService {
   // Feed operations
@@ -268,6 +274,178 @@ export class CacheService {
     const db = getDb();
     const result = db.prepare('DELETE FROM user_preferences WHERE id = ?').run(id);
     return result.changes > 0;
+  }
+
+  // Resource operations
+  addOrUpdateResource(input: ResourceInput): Resource {
+    const db = getDb();
+    const tagsStr = input.tags?.join(',') ?? null;
+
+    const existing = db
+      .prepare('SELECT * FROM resources WHERE name = ? AND type = ?')
+      .get(input.name, input.type) as Resource | undefined;
+
+    if (existing) {
+      db.prepare(`
+        UPDATE resources
+        SET mention_count = mention_count + 1,
+            url = COALESCE(?, url),
+            github_url = COALESCE(?, github_url),
+            description = COALESCE(?, description),
+            tags = COALESCE(?, tags)
+        WHERE id = ?
+      `).run(
+        input.url ?? null,
+        input.github_url ?? null,
+        input.description ?? null,
+        tagsStr,
+        existing.id
+      );
+      return this.getResourceById(existing.id)!;
+    }
+
+    const result = db.prepare(`
+      INSERT INTO resources (name, type, url, github_url, description, tags)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      input.name,
+      input.type,
+      input.url ?? null,
+      input.github_url ?? null,
+      input.description ?? null,
+      tagsStr
+    );
+    return this.getResourceById(result.lastInsertRowid as number)!;
+  }
+
+  getResourceById(id: number): Resource | null {
+    const db = getDb();
+    return db.prepare('SELECT * FROM resources WHERE id = ?').get(id) as Resource | undefined ?? null;
+  }
+
+  linkArticleResource(input: ArticleResourceInput): boolean {
+    const db = getDb();
+    try {
+      db.prepare(`
+        INSERT INTO article_resources (article_id, resource_id, context, relevance)
+        VALUES (?, ?, ?, ?)
+      `).run(
+        input.article_id,
+        input.resource_id,
+        input.context ?? null,
+        input.relevance ?? 'mentioned'
+      );
+      return true;
+    } catch (error) {
+      if ((error as Error).message.includes('UNIQUE constraint failed')) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  getHotResources(options: {
+    days?: number;
+    type?: string;
+    limit?: number;
+  } = {}): ResourceWithStats[] {
+    const db = getDb();
+    const conditions: string[] = [];
+    const params: (number | string)[] = [];
+
+    if (options.days) {
+      conditions.push(`r.first_seen_at >= datetime('now', '-' || ? || ' days')`);
+      params.push(options.days);
+    }
+
+    if (options.type) {
+      conditions.push('r.type = ?');
+      params.push(options.type);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = options.limit ?? 20;
+
+    const sql = `
+      SELECT
+        r.*,
+        COUNT(DISTINCT ar.article_id) as article_count,
+        COUNT(DISTINCT a.feed_id) as source_count
+      FROM resources r
+      LEFT JOIN article_resources ar ON r.id = ar.resource_id
+      LEFT JOIN articles a ON ar.article_id = a.id
+      ${whereClause}
+      GROUP BY r.id
+      ORDER BY source_count DESC, article_count DESC, r.mention_count DESC
+      LIMIT ?
+    `;
+    params.push(limit);
+
+    const rows = db.prepare(sql).all(...params) as (Resource & { source_count: number; article_count: number })[];
+    return rows.map(row => ({
+      ...row,
+      tags_array: row.tags ? row.tags.split(',') : [],
+    }));
+  }
+
+  searchResources(keyword: string, limit = 20): ResourceWithStats[] {
+    const db = getDb();
+    const pattern = `%${keyword}%`;
+
+    const sql = `
+      SELECT
+        r.*,
+        COUNT(DISTINCT ar.article_id) as article_count,
+        COUNT(DISTINCT a.feed_id) as source_count
+      FROM resources r
+      LEFT JOIN article_resources ar ON r.id = ar.resource_id
+      LEFT JOIN articles a ON ar.article_id = a.id
+      WHERE r.name LIKE ? OR r.description LIKE ? OR r.tags LIKE ?
+      GROUP BY r.id
+      ORDER BY source_count DESC, article_count DESC
+      LIMIT ?
+    `;
+
+    const rows = db.prepare(sql).all(pattern, pattern, pattern, limit) as (Resource & { source_count: number; article_count: number })[];
+    return rows.map(row => ({
+      ...row,
+      tags_array: row.tags ? row.tags.split(',') : [],
+    }));
+  }
+
+  getArticlesByResource(resourceId: number, limit = 20): ArticleWithFeed[] {
+    const db = getDb();
+    const sql = `
+      SELECT a.*, f.name as feed_name, f.url as feed_url
+      FROM articles a
+      JOIN article_resources ar ON a.id = ar.article_id
+      JOIN feeds f ON a.feed_id = f.id
+      WHERE ar.resource_id = ?
+      ORDER BY a.pub_date DESC
+      LIMIT ?
+    `;
+    return db.prepare(sql).all(resourceId, limit) as ArticleWithFeed[];
+  }
+
+  getResourceWithStats(id: number): ResourceWithStats | null {
+    const db = getDb();
+    const sql = `
+      SELECT
+        r.*,
+        COUNT(DISTINCT ar.article_id) as article_count,
+        COUNT(DISTINCT a.feed_id) as source_count
+      FROM resources r
+      LEFT JOIN article_resources ar ON r.id = ar.resource_id
+      LEFT JOIN articles a ON ar.article_id = a.id
+      WHERE r.id = ?
+      GROUP BY r.id
+    `;
+    const row = db.prepare(sql).get(id) as (Resource & { source_count: number; article_count: number }) | undefined;
+    if (!row) return null;
+    return {
+      ...row,
+      tags_array: row.tags ? row.tags.split(',') : [],
+    };
   }
 }
 
