@@ -1,21 +1,28 @@
-import { Command } from 'commander';
-import chalk from 'chalk';
-import ora from 'ora';
-import { rssService } from '../services/rss.js';
-import { llmService, type ProgressCallback } from '../services/llm.js';
-import { cacheService } from '../services/cache.js';
-import { exportAnalyzedArticles, EXPORTS_DIR } from '../services/export.js';
-import { logger } from '../utils/logger.js';
+import { Command } from "commander";
+import chalk from "chalk";
+import ora from "ora";
+import { rssService } from "../services/rss.js";
+import { llmService, type ProgressCallback } from "../services/llm.js";
+import { cacheService } from "../services/cache.js";
+import { exportAnalyzedArticles, EXPORTS_DIR } from "../services/export.js";
+import { logger } from "../utils/logger.js";
 
 export function createRunCommand(): Command {
-  const run = new Command('run')
-    .description('Update feeds, analyze articles, and show interesting ones')
-    .option('-d, --days <n>', 'Analyze articles from last N days', '3')
-    .option('-s, --summary', 'Generate summaries for interesting articles')
-    .option('-f, --force', 'Force re-analyze all articles (ignore previous analysis)')
-    .option('--skip-update', 'Skip feed update')
-    .option('--skip-analyze', 'Skip LLM analysis')
-    .option('--json', 'Output as JSON')
+  const run = new Command("run")
+    .description("Update feeds, analyze articles, and show interesting ones")
+    .option("-d, --days <n>", "Analyze articles from last N days", "3")
+    .option(
+      "-s, --summary",
+      "Generate summaries for interesting articles",
+      true,
+    )
+    .option(
+      "-f, --force",
+      "Force re-analyze all articles (ignore previous analysis)",
+    )
+    .option("--skip-update", "Skip feed update")
+    .option("--skip-analyze", "Skip LLM analysis")
+    .option("--json", "Output as JSON")
     .action(async (options) => {
       const results: {
         updated?: Record<string, { newCount: number; error?: string }>;
@@ -26,11 +33,14 @@ export function createRunCommand(): Command {
       try {
         // Step 1: Update feeds
         if (!options.skipUpdate) {
-          const spinner = ora('Updating feeds...').start();
+          const spinner = ora("Updating feeds...").start();
           const updateResults = await rssService.updateAllFeeds();
 
           let totalNew = 0;
-          const updateOutput: Record<string, { newCount: number; error?: string }> = {};
+          const updateOutput: Record<
+            string,
+            { newCount: number; error?: string }
+          > = {};
 
           for (const [name, result] of updateResults) {
             updateOutput[name] = result;
@@ -43,10 +53,10 @@ export function createRunCommand(): Command {
 
         // Step 2: Analyze with LLM (if configured)
         if (!options.skipAnalyze) {
-          const hasLlmKey = process.env.LLM_API_KEY;
+          const hasLlmKey = process.env.OPENAI_API_KEY;
 
           if (hasLlmKey) {
-            const spinner = ora('Analyzing articles with LLM...').start();
+            const spinner = ora("Analyzing articles with LLM...").start();
             const days = parseInt(options.days, 10);
 
             // Get articles to analyze
@@ -61,11 +71,17 @@ export function createRunCommand(): Command {
             }
 
             if (articles.length > 0) {
-              let lastProgress: { phase: string; current: number; total: number; title: string; tokens: number } = {
-                phase: 'filter',
+              let lastProgress: {
+                phase: string;
+                current: number;
+                total: number;
+                title: string;
+                tokens: number;
+              } = {
+                phase: "filter",
                 current: 0,
                 total: articles.length,
-                title: '',
+                title: "",
                 tokens: 0,
               };
               const startTime = Date.now();
@@ -76,10 +92,12 @@ export function createRunCommand(): Command {
                 const timeStr = `${elapsed}s`;
                 const tokenInfo = `[${lastProgress.tokens} tokens | ${timeStr}]`;
 
-                if (lastProgress.phase === 'filter') {
+                if (lastProgress.phase === "filter") {
                   spinner.text = `过滤文章中... ${tokenInfo}`;
                 } else {
-                  const title = lastProgress.title ? ` "${lastProgress.title}..."` : '';
+                  const title = lastProgress.title
+                    ? ` "${lastProgress.title}..."`
+                    : "";
                   spinner.text = `摘要生成 (${lastProgress.current}/${lastProgress.total})${title} ${tokenInfo}`;
                 }
               };
@@ -92,7 +110,7 @@ export function createRunCommand(): Command {
                   phase: progress.phase,
                   current: progress.current,
                   total: progress.total,
-                  title: progress.articleTitle?.slice(0, 40) || '',
+                  title: progress.articleTitle?.slice(0, 40) || "",
                   tokens: progress.tokens.totalTokens,
                 };
                 updateSpinner();
@@ -102,26 +120,32 @@ export function createRunCommand(): Command {
                 const analysisResults = await llmService.analyzeArticles(
                   articles,
                   options.summary,
-                  onProgress
+                  onProgress,
                 );
-                const interestingCount = analysisResults.filter((r) => r.isInteresting).length;
+                const interestingCount = analysisResults.filter(
+                  (r) => r.isInteresting,
+                ).length;
 
                 results.analyzed = {
                   total: articles.length,
                   interesting: interestingCount,
                 };
 
-                spinner.succeed(`Analyzed ${articles.length} articles: ${interestingCount} interesting`);
+                spinner.succeed(
+                  `Analyzed ${articles.length} articles: ${interestingCount} interesting`,
+                );
               } finally {
                 clearInterval(timer);
               }
             } else {
-              spinner.info('No unanalyzed articles found');
+              spinner.info("No unanalyzed articles found");
               results.analyzed = { total: 0, interesting: 0 };
             }
           } else {
             if (!options.json) {
-              logger.warn('LLM not configured. Skipping analysis. Use: rss config set llm_api_key <key>');
+              logger.warn(
+                "LLM not configured. Skipping analysis. Use: rss config set openai_api_key <key>",
+              );
             }
           }
         }
@@ -130,9 +154,11 @@ export function createRunCommand(): Command {
         const days = parseInt(options.days, 10);
 
         if (!options.json) {
-          const exportSpinner = ora('Exporting articles...').start();
+          const exportSpinner = ora("Exporting articles...").start();
           const exportCount = exportAnalyzedArticles(days);
-          exportSpinner.succeed(`Exported ${exportCount} articles to ${EXPORTS_DIR}`);
+          exportSpinner.succeed(
+            `Exported ${exportCount} articles to ${EXPORTS_DIR}`,
+          );
         }
 
         // Step 4: Show interesting articles
@@ -151,34 +177,50 @@ export function createRunCommand(): Command {
 
         // Display interesting articles
         console.log();
-        console.log(chalk.bold.yellow('═══════════════════════════════════════════════════════════════'));
-        console.log(chalk.bold.yellow('                     Interesting Articles                       '));
-        console.log(chalk.bold.yellow('═══════════════════════════════════════════════════════════════'));
+        console.log(
+          chalk.bold.yellow(
+            "═══════════════════════════════════════════════════════════════",
+          ),
+        );
+        console.log(
+          chalk.bold.yellow(
+            "                     Interesting Articles                       ",
+          ),
+        );
+        console.log(
+          chalk.bold.yellow(
+            "═══════════════════════════════════════════════════════════════",
+          ),
+        );
         console.log();
 
         if (interestingArticles.length === 0) {
-          logger.info('No interesting articles found');
+          logger.info("No interesting articles found");
           return;
         }
 
         for (const article of interestingArticles) {
           const date = article.pub_date
             ? new Date(article.pub_date).toLocaleDateString()
-            : 'Unknown';
+            : "Unknown";
 
-          console.log(chalk.green('►') + ' ' + chalk.bold(article.title));
-          console.log(`  ${chalk.dim(`[${article.feed_name}]`)} ${chalk.dim(date)}`);
+          console.log(chalk.green("►") + " " + chalk.bold(article.title));
+          console.log(
+            `  ${chalk.dim(`[${article.feed_name}]`)} ${chalk.dim(date)}`,
+          );
 
           if (article.link) {
             console.log(`  ${chalk.blue(article.link)}`);
           }
 
           if (article.interest_reason) {
-            console.log(`  ${chalk.yellow('为什么有趣:')} ${article.interest_reason}`);
+            console.log(
+              `  ${chalk.yellow("为什么有趣:")} ${article.interest_reason}`,
+            );
           }
 
           if (article.summary) {
-            console.log(`  ${chalk.cyan('摘要:')} ${article.summary}`);
+            console.log(`  ${chalk.cyan("摘要:")} ${article.summary}`);
           }
 
           console.log();

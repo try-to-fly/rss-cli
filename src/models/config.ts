@@ -12,8 +12,8 @@ export interface UserPreference {
 }
 
 export const CONFIG_KEYS = {
-  LLM_API_KEY: 'llm_api_key',
-  LLM_BASE_URL: 'llm_base_url',
+  OPENAI_API_KEY: 'openai_api_key',
+  OPENAI_API_BASE: 'openai_api_base',
   LLM_MODEL: 'llm_model',
   PROXY_URL: 'proxy_url',
 } as const;

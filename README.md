@@ -34,8 +34,8 @@ npm link
 创建 `.env` 文件配置 LLM：
 
 ```env
-LLM_API_KEY=your-api-key
-LLM_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=your-api-key
+OPENAI_API_BASE=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
 
 # 可选：HTTP 代理

@@ -17,15 +17,15 @@ function htmlToPlainText(html: string): string {
 
 // 直接从环境变量读取 LLM 配置
 function getLlmConfig() {
-  const apiKey = process.env.LLM_API_KEY;
-  const baseUrl = process.env.LLM_BASE_URL;
+  const apiKey = process.env.OPENAI_API_KEY;
+  const baseUrl = process.env.OPENAI_API_BASE;
   const model = process.env.LLM_MODEL;
 
   if (!apiKey) {
-    throw new Error('LLM_API_KEY not set in .env');
+    throw new Error('OPENAI_API_KEY not set in .env');
   }
   if (!baseUrl) {
-    throw new Error('LLM_BASE_URL not set in .env');
+    throw new Error('OPENAI_API_BASE not set in .env');
   }
   if (!model) {
     throw new Error('LLM_MODEL not set in .env');
@@ -526,6 +526,41 @@ ${truncatedContent}
     }
 
     return results;
+  }
+
+  async generateOverallSummary(
+    articles: { title: string; summary?: string | null; feed_name: string }[],
+    resources: { name: string; type: string; description?: string | null }[],
+    tags: { name: string; article_count: number }[],
+    days: number
+  ): Promise<string> {
+    const topTags = tags.slice(0, 10).map(t => `${t.name}(${t.article_count}篇)`).join('、');
+    const topResources = resources.slice(0, 5).map(r => r.name).join('、');
+    const articleSummaries = articles.slice(0, 10).map(a =>
+      `- ${a.title}${a.summary ? `: ${a.summary.slice(0, 100)}` : ''}`
+    ).join('\n');
+
+    const prompt = `你是一个技术周报编辑。请根据以下信息，生成一段200-400字的技术周报概览。
+
+时间范围: 最近 ${days} 天
+精选文章数: ${articles.length} 篇
+热门话题: ${topTags}
+热门资源: ${topResources}
+
+部分精选文章:
+${articleSummaries}
+
+要求:
+1. 总结本期主要技术动态和趋势
+2. 指出值得关注的技术方向
+3. 推荐1-2个值得关注的项目或工具
+4. 语言简洁专业，适合技术人员阅读
+5. 只返回概览文本，不要有标题或其他格式
+
+请生成概览:`;
+
+    const content = await this.chatCompletion([{ role: 'user', content: prompt }]);
+    return content.trim() || `本期共收录 ${articles.length} 篇精选文章。`;
   }
 }
 

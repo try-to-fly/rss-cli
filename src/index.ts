@@ -10,6 +10,8 @@ import { createConfigCommand, createPrefCommand } from './commands/config.js';
 import { createRunCommand } from './commands/run.js';
 import { createResourceCommand } from './commands/resource.js';
 import { createTagCommand } from './commands/tag.js';
+import { createCronCommand } from './commands/cron.js';
+import { createReportCommand } from './commands/report.js';
 import { closeDb } from './db/index.js';
 
 const program = new Command();
@@ -31,6 +33,8 @@ program.addCommand(createPrefCommand());
 program.addCommand(createRunCommand());
 program.addCommand(createResourceCommand());
 program.addCommand(createTagCommand());
+program.addCommand(createCronCommand());
+program.addCommand(createReportCommand());
 
 // Handle errors
 program.exitOverride();
