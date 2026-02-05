@@ -323,6 +323,21 @@ export class CacheService {
     return db.prepare('SELECT * FROM resources WHERE id = ?').get(id) as Resource | undefined ?? null;
   }
 
+  getResourceByNameAndType(name: string, type: string): Resource | null {
+    const db = getDb();
+    return db.prepare('SELECT * FROM resources WHERE name = ? AND type = ?').get(name, type) as Resource | undefined ?? null;
+  }
+
+  updateResourceDescription(id: number, description: string): void {
+    const db = getDb();
+    db.prepare('UPDATE resources SET description = ? WHERE id = ?').run(description, id);
+  }
+
+  incrementResourceMentionCount(id: number): void {
+    const db = getDb();
+    db.prepare('UPDATE resources SET mention_count = mention_count + 1 WHERE id = ?').run(id);
+  }
+
   linkArticleResource(input: ArticleResourceInput): boolean {
     const db = getDb();
     try {

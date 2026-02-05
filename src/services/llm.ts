@@ -1,6 +1,6 @@
 import { cacheService } from './cache.js';
 import type { Article } from '../models/article.js';
-import type { SummaryWithResources, ExtractedResource } from '../models/resource.js';
+import type { SummaryWithResources, ExtractedResource, Resource, ResourceInput } from '../models/resource.js';
 
 // 直接从环境变量读取 LLM 配置
 function getLlmConfig() {
@@ -228,6 +228,68 @@ ${articlesText}
     }
   }
 
+  async mergeResourceDescriptions(
+    resourceName: string,
+    resourceType: string,
+    existingDescription: string,
+    newDescription: string
+  ): Promise<string> {
+    const prompt = `你是一个技术资源描述整合助手。请将以下两个关于同一技术资源的描述合并成一个更完整的描述。
+
+资源名称: ${resourceName}
+资源类型: ${resourceType}
+
+描述1: ${existingDescription}
+描述2: ${newDescription}
+
+要求:
+- 整合两个描述的关键信息
+- 去除重复内容
+- 保持简洁（50-150字）
+- 保持客观准确
+
+只返回合并后的描述文本，不要有其他内容。`;
+
+    const content = await this.chatCompletion([{ role: 'user', content: prompt }]);
+    return content.trim() || existingDescription;
+  }
+
+  async addOrUpdateResourceWithMerge(input: ResourceInput): Promise<Resource> {
+    const existing = cacheService.getResourceByNameAndType(input.name, input.type);
+
+    if (existing) {
+      // 检查是否需要合并描述
+      const existingDesc = existing.description || '';
+      const newDesc = input.description || '';
+
+      // 只在新旧描述都有内容且内容不同时才调用 LLM 合并
+      if (existingDesc && newDesc && existingDesc !== newDesc) {
+        console.log(`[LLM] Merging descriptions for resource: ${input.name}`);
+        try {
+          const mergedDescription = await this.mergeResourceDescriptions(
+            input.name,
+            input.type,
+            existingDesc,
+            newDesc
+          );
+          cacheService.updateResourceDescription(existing.id, mergedDescription);
+        } catch (err) {
+          console.error('[LLM] Failed to merge descriptions:', (err as Error).message);
+          // 合并失败时保留原描述
+        }
+      }
+
+      // 增加提及次数
+      cacheService.incrementResourceMentionCount(existing.id);
+
+      // 更新其他字段（URL、GitHub URL、tags）
+      return cacheService.addOrUpdateResource(input);
+    }
+
+    // 资源不存在，直接创建
+    return cacheService.addOrUpdateResource(input);
+  }
+
   async summarizeArticle(article: Article): Promise<string> {
     const content = await this.chatCompletion([
       {
@@ -368,9 +430,9 @@ ${truncatedContent}
           summary = result.summary;
           resources = result.resources;
 
-          // Save resources to database
+          // Save resources to database with smart description merging
           for (const res of result.resources) {
-            const savedResource = cacheService.addOrUpdateResource({
+            const savedResource = await this.addOrUpdateResourceWithMerge({
               name: res.name,
               type: res.type,
               url: res.url,
