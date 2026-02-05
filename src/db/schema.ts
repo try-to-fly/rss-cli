@@ -1,124 +1,125 @@
-export const SCHEMA = `
--- RSS 源表
-CREATE TABLE IF NOT EXISTS feeds (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  url TEXT NOT NULL UNIQUE,
-  category TEXT,
-  proxy_mode TEXT DEFAULT 'auto',  -- 'auto' | 'direct' | 'proxy'
-  proxy_success_count INTEGER DEFAULT 0,
-  direct_success_count INTEGER DEFAULT 0,
-  last_fetched_at DATETIME,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+import { sqliteTable, text, integer, real, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 
--- 标签表
-CREATE TABLE IF NOT EXISTS tags (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE,
-  category TEXT,                          -- tech|topic|language|framework|other
-  color TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
+// RSS 源表
+export const feeds = sqliteTable('feeds', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  url: text('url').notNull().unique(),
+  category: text('category'),
+  proxyMode: text('proxy_mode').default('auto'), // 'auto' | 'direct' | 'proxy'
+  proxySuccessCount: integer('proxy_success_count').default(0),
+  directSuccessCount: integer('direct_success_count').default(0),
+  lastFetchedAt: text('last_fetched_at'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index('idx_feeds_category').on(table.category),
+]);
 
--- 文章-标签关联表
-CREATE TABLE IF NOT EXISTS article_tags (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  article_id INTEGER NOT NULL,
-  tag_id INTEGER NOT NULL,
-  source TEXT DEFAULT 'llm',              -- llm|manual|auto
-  confidence REAL DEFAULT 1.0,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(article_id, tag_id),
-  FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE,
-  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_article_tags_article_id ON article_tags(article_id);
-CREATE INDEX IF NOT EXISTS idx_article_tags_tag_id ON article_tags(tag_id);
+// 标签表
+export const tags = sqliteTable('tags', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull().unique(),
+  category: text('category'), // tech|topic|language|framework|other
+  color: text('color'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index('idx_tags_name').on(table.name),
+]);
 
--- 资源-标签关联表
-CREATE TABLE IF NOT EXISTS resource_tags (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  resource_id INTEGER NOT NULL,
-  tag_id INTEGER NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(resource_id, tag_id),
-  FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE,
-  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_resource_tags_resource_id ON resource_tags(resource_id);
-CREATE INDEX IF NOT EXISTS idx_resource_tags_tag_id ON resource_tags(tag_id);
+// 文章表
+export const articles = sqliteTable('articles', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  feedId: integer('feed_id').notNull().references(() => feeds.id, { onDelete: 'cascade' }),
+  guid: text('guid').notNull(),
+  title: text('title').notNull(),
+  link: text('link'),
+  content: text('content'),
+  pubDate: text('pub_date'),
+  isRead: integer('is_read').default(0),
+  isInteresting: integer('is_interesting'), // LLM 判断: 1=有趣, 0=不感兴趣, NULL=未处理
+  interestReason: text('interest_reason'), // LLM 判断理由
+  summary: text('summary'), // LLM 摘要
+  analyzedAt: text('analyzed_at'), // 分析时间
+  textSnapshot: text('text_snapshot'),
+  snapshotAt: text('snapshot_at'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index('idx_articles_feed_id').on(table.feedId),
+  index('idx_articles_pub_date').on(table.pubDate),
+  index('idx_articles_is_interesting').on(table.isInteresting),
+  index('idx_articles_analyzed_at').on(table.analyzedAt),
+  uniqueIndex('idx_articles_feed_guid').on(table.feedId, table.guid),
+]);
 
--- 文章表
-CREATE TABLE IF NOT EXISTS articles (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  feed_id INTEGER NOT NULL,
-  guid TEXT NOT NULL,
-  title TEXT NOT NULL,
-  link TEXT,
-  content TEXT,
-  pub_date DATETIME,
-  is_read INTEGER DEFAULT 0,
-  is_interesting INTEGER,        -- LLM 判断: 1=有趣, 0=不感兴趣, NULL=未处理
-  interest_reason TEXT,          -- LLM 判断理由
-  summary TEXT,                  -- LLM 摘要
-  analyzed_at DATETIME,          -- 分析时间（避免重复分析）
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(feed_id, guid),
-  FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE
-);
+// 文章-标签关联表
+export const articleTags = sqliteTable('article_tags', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  articleId: integer('article_id').notNull().references(() => articles.id, { onDelete: 'cascade' }),
+  tagId: integer('tag_id').notNull().references(() => tags.id, { onDelete: 'cascade' }),
+  source: text('source').default('llm'), // llm|manual|auto
+  confidence: real('confidence').default(1.0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index('idx_article_tags_article_id').on(table.articleId),
+  index('idx_article_tags_tag_id').on(table.tagId),
+  uniqueIndex('idx_article_tags_unique').on(table.articleId, table.tagId),
+]);
 
--- 用户偏好表（供 LLM 过滤参考）
-CREATE TABLE IF NOT EXISTS user_preferences (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  type TEXT NOT NULL,            -- 'interest' | 'ignore'
-  keyword TEXT NOT NULL,
-  weight INTEGER DEFAULT 1,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+// 技术资源表
+export const resources = sqliteTable('resources', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  type: text('type').notNull(), // tool|library|framework|project|service|other
+  url: text('url'),
+  githubUrl: text('github_url'),
+  description: text('description'),
+  tags: text('tags'), // 标签（逗号分隔）
+  firstSeenAt: text('first_seen_at').default(sql`CURRENT_TIMESTAMP`),
+  mentionCount: integer('mention_count').default(1),
+}, (table) => [
+  index('idx_resources_type').on(table.type),
+  index('idx_resources_mention_count').on(table.mentionCount),
+  uniqueIndex('idx_resources_name_type').on(table.name, table.type),
+]);
 
--- 全局配置表
-CREATE TABLE IF NOT EXISTS config (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
+// 资源-标签关联表
+export const resourceTags = sqliteTable('resource_tags', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  resourceId: integer('resource_id').notNull().references(() => resources.id, { onDelete: 'cascade' }),
+  tagId: integer('tag_id').notNull().references(() => tags.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index('idx_resource_tags_resource_id').on(table.resourceId),
+  index('idx_resource_tags_tag_id').on(table.tagId),
+  uniqueIndex('idx_resource_tags_unique').on(table.resourceId, table.tagId),
+]);
 
--- 技术资源表
-CREATE TABLE IF NOT EXISTS resources (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  type TEXT NOT NULL,                    -- tool|library|framework|project|service|other
-  url TEXT,
-  github_url TEXT,
-  description TEXT,
-  tags TEXT,                             -- 标签（逗号分隔）
-  first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  mention_count INTEGER DEFAULT 1,
-  UNIQUE(name, type)
-);
+// 文章-资源关联表
+export const articleResources = sqliteTable('article_resources', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  articleId: integer('article_id').notNull().references(() => articles.id, { onDelete: 'cascade' }),
+  resourceId: integer('resource_id').notNull().references(() => resources.id, { onDelete: 'cascade' }),
+  context: text('context'), // 提及上下文
+  relevance: text('relevance').default('mentioned'), // main|mentioned|compared
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index('idx_article_resources_article_id').on(table.articleId),
+  index('idx_article_resources_resource_id').on(table.resourceId),
+  uniqueIndex('idx_article_resources_unique').on(table.articleId, table.resourceId),
+]);
 
--- 文章-资源关联表
-CREATE TABLE IF NOT EXISTS article_resources (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  article_id INTEGER NOT NULL,
-  resource_id INTEGER NOT NULL,
-  context TEXT,                          -- 提及上下文
-  relevance TEXT DEFAULT 'mentioned',    -- main|mentioned|compared
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(article_id, resource_id),
-  FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE,
-  FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE
-);
+// 用户偏好表（供 LLM 过滤参考）
+export const userPreferences = sqliteTable('user_preferences', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  type: text('type').notNull(), // 'interest' | 'ignore'
+  keyword: text('keyword').notNull(),
+  weight: integer('weight').default(1),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+});
 
--- 创建索引以提高查询性能
-CREATE INDEX IF NOT EXISTS idx_articles_feed_id ON articles(feed_id);
-CREATE INDEX IF NOT EXISTS idx_articles_pub_date ON articles(pub_date);
-CREATE INDEX IF NOT EXISTS idx_articles_is_interesting ON articles(is_interesting);
-CREATE INDEX IF NOT EXISTS idx_articles_analyzed_at ON articles(analyzed_at);
-CREATE INDEX IF NOT EXISTS idx_feeds_category ON feeds(category);
-CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type);
-CREATE INDEX IF NOT EXISTS idx_resources_mention_count ON resources(mention_count);
-CREATE INDEX IF NOT EXISTS idx_article_resources_article_id ON article_resources(article_id);
-CREATE INDEX IF NOT EXISTS idx_article_resources_resource_id ON article_resources(resource_id);
-`;
+// 全局配置表
+export const config = sqliteTable('config', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+});

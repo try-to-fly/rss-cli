@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { cacheService } from './cache.js';
+import { getSqlite } from '../db/index.js';
 import type { ArticleWithFeed } from '../models/article.js';
 
 const EXPORTS_DIR = join(homedir(), '.rss-cli', 'exports');
@@ -89,14 +90,14 @@ function exportArticle(article: ArticleWithFeed): void {
 
 // 获取文章关联的资源
 function getArticleResources(articleId: number): ArticleExportData['resources'] {
-  const db = require('../db/index.js').getDb();
+  const sqlite = getSqlite();
   const sql = `
     SELECT r.*, ar.context, ar.relevance
     FROM resources r
     JOIN article_resources ar ON r.id = ar.resource_id
     WHERE ar.article_id = ?
   `;
-  const rows = db.prepare(sql).all(articleId) as {
+  const rows = sqlite.prepare(sql).all(articleId) as {
     id: number;
     name: string;
     type: string;

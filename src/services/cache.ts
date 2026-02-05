@@ -1,4 +1,5 @@
-import { getDb } from '../db/index.js';
+import { eq, and, desc, like, or, sql, isNull, gte, inArray, count } from 'drizzle-orm';
+import { getDb, getSqlite, schema } from '../db/index.js';
 import type { Feed, FeedInput } from '../models/feed.js';
 import type { Article, ArticleInput, ArticleWithFeed, ArticleWithTags } from '../models/article.js';
 import type { UserPreference } from '../models/config.js';
@@ -10,69 +11,144 @@ import type {
 } from '../models/resource.js';
 import type {
   Tag,
-  TagInput,
   ArticleTagInput,
   TagWithCount,
-  TagSource,
 } from '../models/tag.js';
+
+const { feeds, articles, tags, articleTags, resources, resourceTags, articleResources, userPreferences, config } = schema;
+
+// 辅助函数：将 drizzle 结果转换为 snake_case 格式
+function toFeed(row: typeof feeds.$inferSelect): Feed {
+  return {
+    id: row.id,
+    name: row.name,
+    url: row.url,
+    category: row.category,
+    proxy_mode: row.proxyMode as Feed['proxy_mode'],
+    proxy_success_count: row.proxySuccessCount ?? 0,
+    direct_success_count: row.directSuccessCount ?? 0,
+    last_fetched_at: row.lastFetchedAt,
+    created_at: row.createdAt ?? '',
+  };
+}
+
+function toArticle(row: typeof articles.$inferSelect): Article {
+  return {
+    id: row.id,
+    feed_id: row.feedId,
+    guid: row.guid,
+    title: row.title,
+    link: row.link,
+    content: row.content,
+    pub_date: row.pubDate,
+    is_read: row.isRead ?? 0,
+    is_interesting: row.isInteresting,
+    interest_reason: row.interestReason,
+    summary: row.summary,
+    analyzed_at: row.analyzedAt,
+    text_snapshot: row.textSnapshot,
+    snapshot_at: row.snapshotAt,
+    created_at: row.createdAt ?? '',
+  };
+}
+
+function toTag(row: typeof tags.$inferSelect): Tag {
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category as Tag['category'],
+    color: row.color,
+    created_at: row.createdAt ?? '',
+  };
+}
+
+function toResource(row: typeof resources.$inferSelect): Resource {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type as Resource['type'],
+    url: row.url,
+    github_url: row.githubUrl,
+    description: row.description,
+    tags: row.tags,
+    first_seen_at: row.firstSeenAt ?? '',
+    mention_count: row.mentionCount ?? 1,
+  };
+}
+
+function toUserPreference(row: typeof userPreferences.$inferSelect): UserPreference {
+  return {
+    id: row.id,
+    type: row.type as UserPreference['type'],
+    keyword: row.keyword,
+    weight: row.weight ?? 1,
+    created_at: row.createdAt ?? '',
+  };
+}
 
 export class CacheService {
   // Feed operations
   addFeed(input: FeedInput): Feed {
     const db = getDb();
-    const stmt = db.prepare(`
-      INSERT INTO feeds (name, url, category, proxy_mode)
-      VALUES (?, ?, ?, ?)
-    `);
-    const result = stmt.run(
-      input.name,
-      input.url,
-      input.category ?? null,
-      input.proxy_mode ?? 'auto'
-    );
-    return this.getFeedById(result.lastInsertRowid as number)!;
+    const result = db.insert(feeds).values({
+      name: input.name,
+      url: input.url,
+      category: input.category ?? null,
+      proxyMode: input.proxy_mode ?? 'auto',
+    }).returning().get();
+    return toFeed(result);
   }
 
   getFeedById(id: number): Feed | null {
     const db = getDb();
-    return db.prepare('SELECT * FROM feeds WHERE id = ?').get(id) as Feed | undefined ?? null;
+    const result = db.select().from(feeds).where(eq(feeds.id, id)).get();
+    return result ? toFeed(result) : null;
   }
 
   getFeedByUrl(url: string): Feed | null {
     const db = getDb();
-    return db.prepare('SELECT * FROM feeds WHERE url = ?').get(url) as Feed | undefined ?? null;
+    const result = db.select().from(feeds).where(eq(feeds.url, url)).get();
+    return result ? toFeed(result) : null;
   }
 
   getAllFeeds(category?: string): Feed[] {
     const db = getDb();
-    if (category) {
-      return db.prepare('SELECT * FROM feeds WHERE category = ? ORDER BY id').all(category) as Feed[];
-    }
-    return db.prepare('SELECT * FROM feeds ORDER BY id').all() as Feed[];
+    const query = category
+      ? db.select().from(feeds).where(eq(feeds.category, category)).orderBy(feeds.id)
+      : db.select().from(feeds).orderBy(feeds.id);
+    return query.all().map(toFeed);
   }
 
   removeFeed(idOrUrl: string): boolean {
     const db = getDb();
     const isNumeric = /^\d+$/.test(idOrUrl);
-    let result;
-    if (isNumeric) {
-      result = db.prepare('DELETE FROM feeds WHERE id = ?').run(parseInt(idOrUrl, 10));
-    } else {
-      result = db.prepare('DELETE FROM feeds WHERE url = ?').run(idOrUrl);
-    }
+    const result = isNumeric
+      ? db.delete(feeds).where(eq(feeds.id, parseInt(idOrUrl, 10))).run()
+      : db.delete(feeds).where(eq(feeds.url, idOrUrl)).run();
     return result.changes > 0;
   }
 
   updateFeedFetchTime(feedId: number): void {
     const db = getDb();
-    db.prepare('UPDATE feeds SET last_fetched_at = datetime("now") WHERE id = ?').run(feedId);
+    db.update(feeds)
+      .set({ lastFetchedAt: sql`datetime('now')` })
+      .where(eq(feeds.id, feedId))
+      .run();
   }
 
   updateFeedProxyStats(feedId: number, mode: 'direct' | 'proxy', success: boolean): void {
+    if (!success) return;
     const db = getDb();
-    const field = mode === 'direct' ? 'direct_success_count' : 'proxy_success_count';
-    if (success) {
-      db.prepare(`UPDATE feeds SET ${field} = ${field} + 1 WHERE id = ?`).run(feedId);
+    if (mode === 'direct') {
+      db.update(feeds)
+        .set({ directSuccessCount: sql`${feeds.directSuccessCount} + 1` })
+        .where(eq(feeds.id, feedId))
+        .run();
+    } else {
+      db.update(feeds)
+        .set({ proxySuccessCount: sql`${feeds.proxySuccessCount} + 1` })
+        .where(eq(feeds.id, feedId))
+        .run();
     }
   }
 
@@ -80,21 +156,16 @@ export class CacheService {
   addArticle(input: ArticleInput): Article | null {
     const db = getDb();
     try {
-      const stmt = db.prepare(`
-        INSERT INTO articles (feed_id, guid, title, link, content, pub_date)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `);
-      const result = stmt.run(
-        input.feed_id,
-        input.guid,
-        input.title,
-        input.link ?? null,
-        input.content ?? null,
-        input.pub_date ?? null
-      );
-      return this.getArticleById(result.lastInsertRowid as number);
+      const result = db.insert(articles).values({
+        feedId: input.feed_id,
+        guid: input.guid,
+        title: input.title,
+        link: input.link ?? null,
+        content: input.content ?? null,
+        pubDate: input.pub_date ?? null,
+      }).returning().get();
+      return toArticle(result);
     } catch (error) {
-      // Duplicate article (unique constraint violation)
       if ((error as Error).message.includes('UNIQUE constraint failed')) {
         return null;
       }
@@ -103,15 +174,15 @@ export class CacheService {
   }
 
   addArticles(inputs: ArticleInput[]): number {
-    const db = getDb();
-    const stmt = db.prepare(`
+    const sqlite = getSqlite();
+    const stmt = sqlite.prepare(`
       INSERT OR IGNORE INTO articles (feed_id, guid, title, link, content, pub_date)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
 
-    const insertMany = db.transaction((articles: ArticleInput[]) => {
-      let count = 0;
-      for (const article of articles) {
+    const insertMany = sqlite.transaction((articleInputs: ArticleInput[]) => {
+      let insertedCount = 0;
+      for (const article of articleInputs) {
         const result = stmt.run(
           article.feed_id,
           article.guid,
@@ -120,9 +191,9 @@ export class CacheService {
           article.content ?? null,
           article.pub_date ?? null
         );
-        if (result.changes > 0) count++;
+        if (result.changes > 0) insertedCount++;
       }
-      return count;
+      return insertedCount;
     });
 
     return insertMany(inputs);
@@ -130,35 +201,36 @@ export class CacheService {
 
   getArticleById(id: number): Article | null {
     const db = getDb();
-    return db.prepare('SELECT * FROM articles WHERE id = ?').get(id) as Article | undefined ?? null;
+    const result = db.select().from(articles).where(eq(articles.id, id)).get();
+    return result ? toArticle(result) : null;
   }
 
   getArticlesByFeed(feedId: number, limit = 50): Article[] {
     const db = getDb();
-    return db.prepare(`
-      SELECT * FROM articles
-      WHERE feed_id = ?
-      ORDER BY pub_date DESC, id DESC
-      LIMIT ?
-    `).all(feedId, limit) as Article[];
+    return db.select()
+      .from(articles)
+      .where(eq(articles.feedId, feedId))
+      .orderBy(desc(articles.pubDate), desc(articles.id))
+      .limit(limit)
+      .all()
+      .map(toArticle);
   }
 
   getUnanalyzedArticles(feedId?: number, days = 7): Article[] {
     const db = getDb();
-    let sql = `
-      SELECT * FROM articles
-      WHERE analyzed_at IS NULL
-      AND pub_date >= datetime('now', '-' || ? || ' days')
-    `;
-    const params: (number | string)[] = [days];
-
+    const conditions = [
+      isNull(articles.analyzedAt),
+      gte(articles.pubDate, sql`datetime('now', '-' || ${days} || ' days')`),
+    ];
     if (feedId) {
-      sql += ' AND feed_id = ?';
-      params.push(feedId);
+      conditions.push(eq(articles.feedId, feedId));
     }
-
-    sql += ' ORDER BY pub_date DESC';
-    return db.prepare(sql).all(...params) as Article[];
+    return db.select()
+      .from(articles)
+      .where(and(...conditions))
+      .orderBy(desc(articles.pubDate))
+      .all()
+      .map(toArticle);
   }
 
   getArticles(options: {
@@ -168,7 +240,7 @@ export class CacheService {
     days?: number;
     limit?: number;
   }): ArticleWithFeed[] {
-    const db = getDb();
+    const sqlite = getSqlite();
     const conditions: string[] = [];
     const params: (number | string)[] = [];
 
@@ -176,16 +248,13 @@ export class CacheService {
       conditions.push('a.feed_id = ?');
       params.push(options.feedId);
     }
-
     if (options.unread) {
       conditions.push('a.is_read = 0');
     }
-
     if (options.interesting !== undefined) {
       conditions.push('a.is_interesting = ?');
       params.push(options.interesting ? 1 : 0);
     }
-
     if (options.days) {
       conditions.push(`a.pub_date >= datetime('now', '-' || ? || ' days')`);
       params.push(options.days);
@@ -194,7 +263,7 @@ export class CacheService {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = options.limit ?? 50;
 
-    const sql = `
+    const sqlQuery = `
       SELECT a.*, f.name as feed_name, f.url as feed_url
       FROM articles a
       JOIN feeds f ON a.feed_id = f.id
@@ -204,11 +273,11 @@ export class CacheService {
     `;
     params.push(limit);
 
-    return db.prepare(sql).all(...params) as ArticleWithFeed[];
+    return sqlite.prepare(sqlQuery).all(...params) as ArticleWithFeed[];
   }
 
   searchArticles(keyword: string, searchIn: 'title' | 'content' | 'all' = 'all'): ArticleWithFeed[] {
-    const db = getDb();
+    const sqlite = getSqlite();
     const pattern = `%${keyword}%`;
     let condition: string;
 
@@ -223,7 +292,7 @@ export class CacheService {
         condition = '(a.title LIKE ? OR a.content LIKE ?)';
     }
 
-    const sql = `
+    const sqlQuery = `
       SELECT a.*, f.name as feed_name, f.url as feed_url
       FROM articles a
       JOIN feeds f ON a.feed_id = f.id
@@ -233,9 +302,9 @@ export class CacheService {
     `;
 
     if (searchIn === 'all') {
-      return db.prepare(sql).all(pattern, pattern) as ArticleWithFeed[];
+      return sqlite.prepare(sqlQuery).all(pattern, pattern) as ArticleWithFeed[];
     }
-    return db.prepare(sql).all(pattern) as ArticleWithFeed[];
+    return sqlite.prepare(sqlQuery).all(pattern) as ArticleWithFeed[];
   }
 
   updateArticleAnalysis(
@@ -245,41 +314,54 @@ export class CacheService {
     summary?: string
   ): void {
     const db = getDb();
-    db.prepare(`
-      UPDATE articles
-      SET is_interesting = ?, interest_reason = ?, summary = ?, analyzed_at = datetime('now')
-      WHERE id = ?
-    `).run(isInteresting ? 1 : 0, reason, summary ?? null, articleId);
+    db.update(articles)
+      .set({
+        isInteresting: isInteresting ? 1 : 0,
+        interestReason: reason,
+        summary: summary ?? null,
+        analyzedAt: sql`datetime('now')`,
+      })
+      .where(eq(articles.id, articleId))
+      .run();
   }
 
   markArticleAsRead(articleId: number): void {
     const db = getDb();
-    db.prepare('UPDATE articles SET is_read = 1 WHERE id = ?').run(articleId);
+    db.update(articles)
+      .set({ isRead: 1 })
+      .where(eq(articles.id, articleId))
+      .run();
   }
 
   // User preference operations
   addPreference(type: 'interest' | 'ignore', keyword: string, weight = 1): UserPreference {
     const db = getDb();
-    const result = db.prepare(`
-      INSERT INTO user_preferences (type, keyword, weight)
-      VALUES (?, ?, ?)
-    `).run(type, keyword, weight);
-    return this.getPreferenceById(result.lastInsertRowid as number)!;
+    const result = db.insert(userPreferences).values({
+      type,
+      keyword,
+      weight,
+    }).returning().get();
+    return toUserPreference(result);
   }
 
   getPreferenceById(id: number): UserPreference | null {
     const db = getDb();
-    return db.prepare('SELECT * FROM user_preferences WHERE id = ?').get(id) as UserPreference | undefined ?? null;
+    const result = db.select().from(userPreferences).where(eq(userPreferences.id, id)).get();
+    return result ? toUserPreference(result) : null;
   }
 
   getAllPreferences(): UserPreference[] {
     const db = getDb();
-    return db.prepare('SELECT * FROM user_preferences ORDER BY type, id').all() as UserPreference[];
+    return db.select()
+      .from(userPreferences)
+      .orderBy(userPreferences.type, userPreferences.id)
+      .all()
+      .map(toUserPreference);
   }
 
   removePreference(id: number): boolean {
     const db = getDb();
-    const result = db.prepare('DELETE FROM user_preferences WHERE id = ?').run(id);
+    const result = db.delete(userPreferences).where(eq(userPreferences.id, id)).run();
     return result.changes > 0;
   }
 
@@ -288,75 +370,76 @@ export class CacheService {
     const db = getDb();
     const tagsStr = input.tags?.join(',') ?? null;
 
-    const existing = db
-      .prepare('SELECT * FROM resources WHERE name = ? AND type = ?')
-      .get(input.name, input.type) as Resource | undefined;
+    const existing = db.select()
+      .from(resources)
+      .where(and(eq(resources.name, input.name), eq(resources.type, input.type)))
+      .get();
 
     if (existing) {
-      db.prepare(`
-        UPDATE resources
-        SET mention_count = mention_count + 1,
-            url = COALESCE(?, url),
-            github_url = COALESCE(?, github_url),
-            description = COALESCE(?, description),
-            tags = COALESCE(?, tags)
-        WHERE id = ?
-      `).run(
-        input.url ?? null,
-        input.github_url ?? null,
-        input.description ?? null,
-        tagsStr,
-        existing.id
-      );
+      db.update(resources)
+        .set({
+          mentionCount: sql`${resources.mentionCount} + 1`,
+          url: input.url ?? existing.url,
+          githubUrl: input.github_url ?? existing.githubUrl,
+          description: input.description ?? existing.description,
+          tags: tagsStr ?? existing.tags,
+        })
+        .where(eq(resources.id, existing.id))
+        .run();
       return this.getResourceById(existing.id)!;
     }
 
-    const result = db.prepare(`
-      INSERT INTO resources (name, type, url, github_url, description, tags)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      input.name,
-      input.type,
-      input.url ?? null,
-      input.github_url ?? null,
-      input.description ?? null,
-      tagsStr
-    );
-    return this.getResourceById(result.lastInsertRowid as number)!;
+    const result = db.insert(resources).values({
+      name: input.name,
+      type: input.type,
+      url: input.url ?? null,
+      githubUrl: input.github_url ?? null,
+      description: input.description ?? null,
+      tags: tagsStr,
+    }).returning().get();
+    return toResource(result);
   }
 
   getResourceById(id: number): Resource | null {
     const db = getDb();
-    return db.prepare('SELECT * FROM resources WHERE id = ?').get(id) as Resource | undefined ?? null;
+    const result = db.select().from(resources).where(eq(resources.id, id)).get();
+    return result ? toResource(result) : null;
   }
 
   getResourceByNameAndType(name: string, type: string): Resource | null {
     const db = getDb();
-    return db.prepare('SELECT * FROM resources WHERE name = ? AND type = ?').get(name, type) as Resource | undefined ?? null;
+    const result = db.select()
+      .from(resources)
+      .where(and(eq(resources.name, name), eq(resources.type, type)))
+      .get();
+    return result ? toResource(result) : null;
   }
 
   updateResourceDescription(id: number, description: string): void {
     const db = getDb();
-    db.prepare('UPDATE resources SET description = ? WHERE id = ?').run(description, id);
+    db.update(resources)
+      .set({ description })
+      .where(eq(resources.id, id))
+      .run();
   }
 
   incrementResourceMentionCount(id: number): void {
     const db = getDb();
-    db.prepare('UPDATE resources SET mention_count = mention_count + 1 WHERE id = ?').run(id);
+    db.update(resources)
+      .set({ mentionCount: sql`${resources.mentionCount} + 1` })
+      .where(eq(resources.id, id))
+      .run();
   }
 
   linkArticleResource(input: ArticleResourceInput): boolean {
     const db = getDb();
     try {
-      db.prepare(`
-        INSERT INTO article_resources (article_id, resource_id, context, relevance)
-        VALUES (?, ?, ?, ?)
-      `).run(
-        input.article_id,
-        input.resource_id,
-        input.context ?? null,
-        input.relevance ?? 'mentioned'
-      );
+      db.insert(articleResources).values({
+        articleId: input.article_id,
+        resourceId: input.resource_id,
+        context: input.context ?? null,
+        relevance: input.relevance ?? 'mentioned',
+      }).run();
       return true;
     } catch (error) {
       if ((error as Error).message.includes('UNIQUE constraint failed')) {
@@ -371,7 +454,7 @@ export class CacheService {
     type?: string;
     limit?: number;
   } = {}): ResourceWithStats[] {
-    const db = getDb();
+    const sqlite = getSqlite();
     const conditions: string[] = [];
     const params: (number | string)[] = [];
 
@@ -379,7 +462,6 @@ export class CacheService {
       conditions.push(`r.first_seen_at >= datetime('now', '-' || ? || ' days')`);
       params.push(options.days);
     }
-
     if (options.type) {
       conditions.push('r.type = ?');
       params.push(options.type);
@@ -388,7 +470,7 @@ export class CacheService {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = options.limit ?? 20;
 
-    const sql = `
+    const sqlQuery = `
       SELECT
         r.*,
         COUNT(DISTINCT ar.article_id) as article_count,
@@ -403,7 +485,7 @@ export class CacheService {
     `;
     params.push(limit);
 
-    const rows = db.prepare(sql).all(...params) as (Resource & { source_count: number; article_count: number })[];
+    const rows = sqlite.prepare(sqlQuery).all(...params) as (Resource & { source_count: number; article_count: number })[];
     return rows.map(row => ({
       ...row,
       tags_array: row.tags ? row.tags.split(',') : [],
@@ -411,10 +493,10 @@ export class CacheService {
   }
 
   searchResources(keyword: string, limit = 20): ResourceWithStats[] {
-    const db = getDb();
+    const sqlite = getSqlite();
     const pattern = `%${keyword}%`;
 
-    const sql = `
+    const sqlQuery = `
       SELECT
         r.*,
         COUNT(DISTINCT ar.article_id) as article_count,
@@ -428,7 +510,7 @@ export class CacheService {
       LIMIT ?
     `;
 
-    const rows = db.prepare(sql).all(pattern, pattern, pattern, limit) as (Resource & { source_count: number; article_count: number })[];
+    const rows = sqlite.prepare(sqlQuery).all(pattern, pattern, pattern, limit) as (Resource & { source_count: number; article_count: number })[];
     return rows.map(row => ({
       ...row,
       tags_array: row.tags ? row.tags.split(',') : [],
@@ -436,8 +518,8 @@ export class CacheService {
   }
 
   getArticlesByResource(resourceId: number, limit = 20): ArticleWithFeed[] {
-    const db = getDb();
-    const sql = `
+    const sqlite = getSqlite();
+    const sqlQuery = `
       SELECT a.*, f.name as feed_name, f.url as feed_url
       FROM articles a
       JOIN article_resources ar ON a.id = ar.article_id
@@ -446,12 +528,12 @@ export class CacheService {
       ORDER BY a.pub_date DESC
       LIMIT ?
     `;
-    return db.prepare(sql).all(resourceId, limit) as ArticleWithFeed[];
+    return sqlite.prepare(sqlQuery).all(resourceId, limit) as ArticleWithFeed[];
   }
 
   getResourceWithStats(id: number): ResourceWithStats | null {
-    const db = getDb();
-    const sql = `
+    const sqlite = getSqlite();
+    const sqlQuery = `
       SELECT
         r.*,
         COUNT(DISTINCT ar.article_id) as article_count,
@@ -462,7 +544,7 @@ export class CacheService {
       WHERE r.id = ?
       GROUP BY r.id
     `;
-    const row = db.prepare(sql).get(id) as (Resource & { source_count: number; article_count: number }) | undefined;
+    const row = sqlite.prepare(sqlQuery).get(id) as (Resource & { source_count: number; article_count: number }) | undefined;
     if (!row) return null;
     return {
       ...row,
@@ -475,27 +557,26 @@ export class CacheService {
     const db = getDb();
     const normalizedName = name.toLowerCase().trim();
 
-    const existing = db.prepare('SELECT * FROM tags WHERE name = ?').get(normalizedName) as Tag | undefined;
+    const existing = db.select().from(tags).where(eq(tags.name, normalizedName)).get();
     if (existing) {
-      return existing;
+      return toTag(existing);
     }
 
-    const result = db.prepare(`
-      INSERT INTO tags (name, category)
-      VALUES (?, ?)
-    `).run(normalizedName, category ?? null);
-
-    return db.prepare('SELECT * FROM tags WHERE id = ?').get(result.lastInsertRowid) as Tag;
+    const result = db.insert(tags).values({
+      name: normalizedName,
+      category: category ?? null,
+    }).returning().get();
+    return toTag(result);
   }
 
   getAllTags(): Tag[] {
     const db = getDb();
-    return db.prepare('SELECT * FROM tags ORDER BY name').all() as Tag[];
+    return db.select().from(tags).orderBy(tags.name).all().map(toTag);
   }
 
   getTagsWithCounts(): TagWithCount[] {
-    const db = getDb();
-    const sql = `
+    const sqlite = getSqlite();
+    const sqlQuery = `
       SELECT
         t.*,
         COUNT(DISTINCT at.article_id) as article_count,
@@ -506,19 +587,20 @@ export class CacheService {
       GROUP BY t.id
       ORDER BY article_count DESC, t.name
     `;
-    return db.prepare(sql).all() as TagWithCount[];
+    return sqlite.prepare(sqlQuery).all() as TagWithCount[];
   }
 
   getTagByName(name: string): Tag | null {
     const db = getDb();
     const normalizedName = name.toLowerCase().trim();
-    return db.prepare('SELECT * FROM tags WHERE name = ?').get(normalizedName) as Tag | undefined ?? null;
+    const result = db.select().from(tags).where(eq(tags.name, normalizedName)).get();
+    return result ? toTag(result) : null;
   }
 
   searchTags(keyword: string): TagWithCount[] {
-    const db = getDb();
+    const sqlite = getSqlite();
     const pattern = `%${keyword.toLowerCase()}%`;
-    const sql = `
+    const sqlQuery = `
       SELECT
         t.*,
         COUNT(DISTINCT at.article_id) as article_count,
@@ -530,21 +612,18 @@ export class CacheService {
       GROUP BY t.id
       ORDER BY article_count DESC
     `;
-    return db.prepare(sql).all(pattern) as TagWithCount[];
+    return sqlite.prepare(sqlQuery).all(pattern) as TagWithCount[];
   }
 
   linkArticleTag(input: ArticleTagInput): boolean {
     const db = getDb();
     try {
-      db.prepare(`
-        INSERT INTO article_tags (article_id, tag_id, source, confidence)
-        VALUES (?, ?, ?, ?)
-      `).run(
-        input.article_id,
-        input.tag_id,
-        input.source ?? 'llm',
-        input.confidence ?? 1.0
-      );
+      db.insert(articleTags).values({
+        articleId: input.article_id,
+        tagId: input.tag_id,
+        source: input.source ?? 'llm',
+        confidence: input.confidence ?? 1.0,
+      }).run();
       return true;
     } catch (error) {
       if ((error as Error).message.includes('UNIQUE constraint failed')) {
@@ -555,20 +634,21 @@ export class CacheService {
   }
 
   getArticleTags(articleId: number): Tag[] {
-    const db = getDb();
-    const sql = `
+    const sqlite = getSqlite();
+    const sqlQuery = `
       SELECT t.*
       FROM tags t
       JOIN article_tags at ON t.id = at.tag_id
       WHERE at.article_id = ?
       ORDER BY t.name
     `;
-    return db.prepare(sql).all(articleId) as Tag[];
+    const rows = sqlite.prepare(sqlQuery).all(articleId) as (typeof tags.$inferSelect)[];
+    return rows.map(toTag);
   }
 
   getArticlesByTag(tagId: number, limit = 50): ArticleWithFeed[] {
-    const db = getDb();
-    const sql = `
+    const sqlite = getSqlite();
+    const sqlQuery = `
       SELECT a.*, f.name as feed_name, f.url as feed_url
       FROM articles a
       JOIN article_tags at ON a.id = at.article_id
@@ -577,7 +657,7 @@ export class CacheService {
       ORDER BY a.pub_date DESC
       LIMIT ?
     `;
-    return db.prepare(sql).all(tagId, limit) as ArticleWithFeed[];
+    return sqlite.prepare(sqlQuery).all(tagId, limit) as ArticleWithFeed[];
   }
 
   getArticlesByTagName(tagName: string, limit = 50): ArticleWithFeed[] {
@@ -589,10 +669,10 @@ export class CacheService {
   linkResourceTag(resourceId: number, tagId: number): boolean {
     const db = getDb();
     try {
-      db.prepare(`
-        INSERT INTO resource_tags (resource_id, tag_id)
-        VALUES (?, ?)
-      `).run(resourceId, tagId);
+      db.insert(resourceTags).values({
+        resourceId,
+        tagId,
+      }).run();
       return true;
     } catch (error) {
       if ((error as Error).message.includes('UNIQUE constraint failed')) {
@@ -603,20 +683,21 @@ export class CacheService {
   }
 
   getResourceTags(resourceId: number): Tag[] {
-    const db = getDb();
-    const sql = `
+    const sqlite = getSqlite();
+    const sqlQuery = `
       SELECT t.*
       FROM tags t
       JOIN resource_tags rt ON t.id = rt.tag_id
       WHERE rt.resource_id = ?
       ORDER BY t.name
     `;
-    return db.prepare(sql).all(resourceId) as Tag[];
+    const rows = sqlite.prepare(sqlQuery).all(resourceId) as (typeof tags.$inferSelect)[];
+    return rows.map(toTag);
   }
 
   getResourcesByTag(tagId: number, limit = 50): ResourceWithStats[] {
-    const db = getDb();
-    const sql = `
+    const sqlite = getSqlite();
+    const sqlQuery = `
       SELECT
         r.*,
         COUNT(DISTINCT ar.article_id) as article_count,
@@ -630,7 +711,7 @@ export class CacheService {
       ORDER BY source_count DESC, article_count DESC
       LIMIT ?
     `;
-    const rows = db.prepare(sql).all(tagId, limit) as (Resource & { source_count: number; article_count: number })[];
+    const rows = sqlite.prepare(sqlQuery).all(tagId, limit) as (Resource & { source_count: number; article_count: number })[];
     return rows.map(row => ({
       ...row,
       tags_array: row.tags ? row.tags.split(',') : [],
@@ -646,17 +727,22 @@ export class CacheService {
   // Snapshot operations
   saveArticleSnapshot(articleId: number, textContent: string): void {
     const db = getDb();
-    db.prepare(`
-      UPDATE articles
-      SET text_snapshot = ?, snapshot_at = datetime('now')
-      WHERE id = ?
-    `).run(textContent, articleId);
+    db.update(articles)
+      .set({
+        textSnapshot: textContent,
+        snapshotAt: sql`datetime('now')`,
+      })
+      .where(eq(articles.id, articleId))
+      .run();
   }
 
   getArticleSnapshot(articleId: number): string | null {
     const db = getDb();
-    const row = db.prepare('SELECT text_snapshot FROM articles WHERE id = ?').get(articleId) as { text_snapshot: string | null } | undefined;
-    return row?.text_snapshot ?? null;
+    const result = db.select({ textSnapshot: articles.textSnapshot })
+      .from(articles)
+      .where(eq(articles.id, articleId))
+      .get();
+    return result?.textSnapshot ?? null;
   }
 
   // Enhanced getArticles with tag filtering
@@ -668,7 +754,7 @@ export class CacheService {
     limit?: number;
     tags?: string[];
   }): ArticleWithTags[] {
-    const db = getDb();
+    const sqlite = getSqlite();
     const conditions: string[] = [];
     const params: (number | string)[] = [];
 
@@ -676,21 +762,17 @@ export class CacheService {
       conditions.push('a.feed_id = ?');
       params.push(options.feedId);
     }
-
     if (options.unread) {
       conditions.push('a.is_read = 0');
     }
-
     if (options.interesting !== undefined) {
       conditions.push('a.is_interesting = ?');
       params.push(options.interesting ? 1 : 0);
     }
-
     if (options.days) {
       conditions.push(`a.pub_date >= datetime('now', '-' || ? || ' days')`);
       params.push(options.days);
     }
-
     if (options.tags && options.tags.length > 0) {
       const tagPlaceholders = options.tags.map(() => '?').join(',');
       conditions.push(`a.id IN (
@@ -704,7 +786,7 @@ export class CacheService {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = options.limit ?? 50;
 
-    const sql = `
+    const sqlQuery = `
       SELECT a.*, f.name as feed_name, f.url as feed_url
       FROM articles a
       JOIN feeds f ON a.feed_id = f.id
@@ -714,10 +796,9 @@ export class CacheService {
     `;
     params.push(limit);
 
-    const articles = db.prepare(sql).all(...params) as ArticleWithFeed[];
+    const articleRows = sqlite.prepare(sqlQuery).all(...params) as ArticleWithFeed[];
 
-    // Fetch tags for each article
-    return articles.map(article => ({
+    return articleRows.map(article => ({
       ...article,
       tags: this.getArticleTags(article.id),
     }));

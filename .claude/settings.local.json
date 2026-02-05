@@ -5,7 +5,10 @@
       "Bash(pnpm rss feed --help:*)",
       "Bash(pnpm rss:*)",
       "Bash(wc:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(pnpm tsc:*)",
+      "Bash(tree:*)",
+      "Bash(sqlite3:*)"
     ]
   }
 }
