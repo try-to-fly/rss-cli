@@ -1,0 +1,42 @@
+#!/usr/bin/env node
+
+import { Command } from 'commander';
+import { createFeedCommand } from './commands/feed.js';
+import { createUpdateCommand } from './commands/update.js';
+import { createSummaryCommand } from './commands/summary.js';
+import { createSearchCommand, createShowCommand, createDigestCommand } from './commands/search.js';
+import { createConfigCommand, createPrefCommand } from './commands/config.js';
+import { createRunCommand } from './commands/run.js';
+import { closeDb } from './db/index.js';
+
+const program = new Command();
+
+program
+  .name('rss')
+  .description('A feature-rich RSS subscription management CLI tool')
+  .version('1.0.0');
+
+// Register commands
+program.addCommand(createFeedCommand());
+program.addCommand(createUpdateCommand());
+program.addCommand(createSummaryCommand());
+program.addCommand(createSearchCommand());
+program.addCommand(createShowCommand());
+program.addCommand(createDigestCommand());
+program.addCommand(createConfigCommand());
+program.addCommand(createPrefCommand());
+program.addCommand(createRunCommand());
+
+// Handle errors
+program.exitOverride();
+
+try {
+  await program.parseAsync(process.argv);
+} catch (error) {
+  if ((error as Error).name !== 'CommanderError') {
+    console.error('Error:', (error as Error).message);
+    process.exit(1);
+  }
+} finally {
+  closeDb();
+}

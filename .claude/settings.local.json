@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm init)",
+      "Bash(pnpm rss feed --help:*)",
+      "Bash(pnpm rss:*)"
+    ]
+  }
+}
