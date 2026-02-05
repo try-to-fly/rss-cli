@@ -50,9 +50,9 @@ function formatArticle(article: ArticleWithFeed | ArticleWithTags, showContent =
 
 export function createSearchCommand(): Command {
   const search = new Command('search')
-    .description('Search articles by keyword')
-    .argument('<keyword>', 'Search keyword')
-    .option('-i, --in <field>', 'Search in: title, content, or all', 'all')
+    .description('按关键词搜索文章')
+    .argument('<keyword>', '搜索关键词')
+    .option('-i, --in <field>', '搜索范围: title, content 或 all', 'all')
     .option('--json', 'Output as JSON')
     .action((keyword: string, options) => {
       const searchIn = options.in as 'title' | 'content' | 'all';
@@ -82,10 +82,10 @@ export function createSearchCommand(): Command {
 
 export function createDigestCommand(): Command {
   const digest = new Command('digest')
-    .description('View article summaries in table or JSON format')
-    .option('-d, --days <n>', 'Show articles from last N days', '30')
-    .option('-l, --limit <n>', 'Limit number of articles', '20')
-    .option('-a, --all', 'Show all analyzed articles (not just interesting)')
+    .description('以表格或 JSON 格式查看文章摘要')
+    .option('-d, --days <n>', '显示最近 N 天的文章', '30')
+    .option('-l, --limit <n>', '限制文章数量', '20')
+    .option('-a, --all', '显示所有已分析的文章（不仅是有趣的）')
     .option('--json', 'Output as JSON')
     .action((options) => {
       const articles = cacheService.getArticles({
@@ -157,14 +157,14 @@ export function createDigestCommand(): Command {
 
 export function createShowCommand(): Command {
   const show = new Command('show')
-    .description('Show articles')
-    .option('-f, --feed <id>', 'Filter by feed ID')
-    .option('-u, --unread', 'Show only unread articles')
-    .option('-i, --interesting', 'Show only interesting articles')
-    .option('-n, --not-interesting', 'Show only not interesting articles')
-    .option('-d, --days <n>', 'Show articles from last N days')
-    .option('-l, --limit <n>', 'Limit number of articles', '50')
-    .option('-t, --tag <tags>', 'Filter by tags (comma-separated)')
+    .description('显示文章列表')
+    .option('-f, --feed <id>', '按订阅源 ID 筛选')
+    .option('-u, --unread', '仅显示未读文章')
+    .option('-i, --interesting', '仅显示有趣的文章')
+    .option('-n, --not-interesting', '仅显示不感兴趣的文章')
+    .option('-d, --days <n>', '显示最近 N 天的文章')
+    .option('-l, --limit <n>', '限制文章数量', '50')
+    .option('-t, --tag <tags>', '按标签筛选（逗号分隔）')
     .option('--json', 'Output as JSON')
     .action((options) => {
       const tags = options.tag ? options.tag.split(',').map((t: string) => t.trim()) : undefined;

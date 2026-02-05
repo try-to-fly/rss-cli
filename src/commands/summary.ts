@@ -7,11 +7,11 @@ import { logger } from '../utils/logger.js';
 
 export function createSummaryCommand(): Command {
   const summary = new Command('analyze')
-    .description('Analyze articles using LLM (filter and summarize)')
-    .option('-f, --feed <id>', 'Analyze specific feed by ID')
-    .option('-d, --days <n>', 'Analyze articles from last N days', '7')
-    .option('-s, --summary', 'Generate summaries for interesting articles')
-    .option('-b, --batch <n>', 'Batch size for LLM calls', '10')
+    .description('使用 LLM 分析文章（过滤和生成摘要）')
+    .option('-f, --feed <id>', '分析指定 ID 的订阅源')
+    .option('-d, --days <n>', '分析最近 N 天的文章', '7')
+    .option('-s, --summary', '为有趣的文章生成摘要')
+    .option('-b, --batch <n>', 'LLM 调用的批次大小', '10')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       const spinner = ora('Analyzing articles...').start();

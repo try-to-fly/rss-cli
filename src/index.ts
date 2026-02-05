@@ -18,7 +18,7 @@ const program = new Command();
 
 program
   .name('rss')
-  .description('A feature-rich RSS subscription management CLI tool')
+  .description('功能丰富的 RSS 订阅管理命令行工具')
   .version('1.0.0');
 
 // Register commands

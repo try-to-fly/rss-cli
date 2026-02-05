@@ -9,19 +9,19 @@ import { logger } from "../utils/logger.js";
 
 export function createRunCommand(): Command {
   const run = new Command("run")
-    .description("Update feeds, analyze articles, and show interesting ones")
-    .option("-d, --days <n>", "Analyze articles from last N days", "3")
+    .description("更新订阅源、分析文章并显示有趣的内容")
+    .option("-d, --days <n>", "分析最近 N 天的文章", "3")
     .option(
       "-s, --summary",
-      "Generate summaries for interesting articles",
+      "为有趣的文章生成摘要",
       true,
     )
     .option(
       "-f, --force",
-      "Force re-analyze all articles (ignore previous analysis)",
+      "强制重新分析所有文章（忽略之前的分析结果）",
     )
-    .option("--skip-update", "Skip feed update")
-    .option("--skip-analyze", "Skip LLM analysis")
+    .option("--skip-update", "跳过订阅源更新")
+    .option("--skip-analyze", "跳过 LLM 分析")
     .option("--json", "Output as JSON")
     .action(async (options) => {
       const results: {

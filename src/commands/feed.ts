@@ -7,15 +7,15 @@ import { logger } from '../utils/logger.js';
 import type { Feed } from '../models/feed.js';
 
 export function createFeedCommand(): Command {
-  const feed = new Command('feed').description('Manage RSS feeds');
+  const feed = new Command('feed').description('RSS 订阅源管理');
 
   feed
     .command('add')
-    .description('Add a new RSS feed')
-    .argument('<url>', 'Feed URL')
-    .option('-n, --name <name>', 'Feed name (auto-detected if not provided)')
-    .option('-c, --category <category>', 'Feed category')
-    .option('-p, --proxy <mode>', 'Proxy mode: auto, direct, or proxy', 'auto')
+    .description('添加新的 RSS 订阅源')
+    .argument('<url>', '订阅源 URL')
+    .option('-n, --name <name>', '订阅源名称（不提供则自动检测）')
+    .option('-c, --category <category>', '订阅源分类')
+    .option('-p, --proxy <mode>', '代理模式: auto, direct 或 proxy', 'auto')
     .option('--json', 'Output as JSON')
     .action(async (url: string, options) => {
       const spinner = ora('Adding feed...').start();
@@ -75,8 +75,8 @@ export function createFeedCommand(): Command {
 
   feed
     .command('remove')
-    .description('Remove an RSS feed')
-    .argument('<id-or-url>', 'Feed ID or URL')
+    .description('移除 RSS 订阅源')
+    .argument('<id-or-url>', '订阅源 ID 或 URL')
     .option('--json', 'Output as JSON')
     .action((idOrUrl: string, options) => {
       const success = cacheService.removeFeed(idOrUrl);
@@ -92,8 +92,8 @@ export function createFeedCommand(): Command {
 
   feed
     .command('list')
-    .description('List all RSS feeds')
-    .option('-c, --category <category>', 'Filter by category')
+    .description('列出所有 RSS 订阅源')
+    .option('-c, --category <category>', '按分类筛选')
     .option('--json', 'Output as JSON')
     .action((options) => {
       const feeds = cacheService.getAllFeeds(options.category);

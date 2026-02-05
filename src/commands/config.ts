@@ -6,13 +6,13 @@ import { logger } from '../utils/logger.js';
 import { CONFIG_KEYS } from '../models/config.js';
 
 export function createConfigCommand(): Command {
-  const config = new Command('config').description('Manage configuration');
+  const config = new Command('config').description('配置管理');
 
   config
     .command('set')
-    .description('Set a configuration value')
-    .argument('<key>', 'Configuration key')
-    .argument('<value>', 'Configuration value')
+    .description('设置配置项')
+    .argument('<key>', '配置键')
+    .argument('<value>', '配置值')
     .option('--json', 'Output as JSON')
     .action((key: string, value: string, options) => {
       setConfig(key, value);
@@ -26,8 +26,8 @@ export function createConfigCommand(): Command {
 
   config
     .command('get')
-    .description('Get a configuration value')
-    .argument('<key>', 'Configuration key')
+    .description('获取配置项')
+    .argument('<key>', '配置键')
     .option('--json', 'Output as JSON')
     .action((key: string, options) => {
       const value = getConfig(key);
@@ -43,8 +43,8 @@ export function createConfigCommand(): Command {
 
   config
     .command('delete')
-    .description('Delete a configuration value')
-    .argument('<key>', 'Configuration key')
+    .description('删除配置项')
+    .argument('<key>', '配置键')
     .option('--json', 'Output as JSON')
     .action((key: string, options) => {
       const success = deleteConfig(key);
@@ -60,7 +60,7 @@ export function createConfigCommand(): Command {
 
   config
     .command('list')
-    .description('List all configurations')
+    .description('列出所有配置项')
     .option('--json', 'Output as JSON')
     .action((options) => {
       const configs = getAllConfig();
@@ -99,14 +99,14 @@ export function createConfigCommand(): Command {
 }
 
 export function createPrefCommand(): Command {
-  const pref = new Command('pref').description('Manage user preferences');
+  const pref = new Command('pref').description('用户偏好管理');
 
   pref
     .command('add')
-    .description('Add a preference keyword')
-    .argument('<keyword>', 'Keyword to add')
-    .requiredOption('-t, --type <type>', 'Type: interest or ignore')
-    .option('-w, --weight <n>', 'Weight (importance)', '1')
+    .description('添加偏好关键词')
+    .argument('<keyword>', '要添加的关键词')
+    .requiredOption('-t, --type <type>', '类型: interest 或 ignore')
+    .option('-w, --weight <n>', '权重（重要程度）', '1')
     .option('--json', 'Output as JSON')
     .action((keyword: string, options) => {
       if (!['interest', 'ignore'].includes(options.type)) {
@@ -129,7 +129,7 @@ export function createPrefCommand(): Command {
 
   pref
     .command('list')
-    .description('List all preferences')
+    .description('列出所有偏好设置')
     .option('--json', 'Output as JSON')
     .action((options) => {
       const prefs = cacheService.getAllPreferences();
@@ -170,8 +170,8 @@ export function createPrefCommand(): Command {
 
   pref
     .command('remove')
-    .description('Remove a preference')
-    .argument('<id>', 'Preference ID')
+    .description('移除偏好设置')
+    .argument('<id>', '偏好设置 ID')
     .option('--json', 'Output as JSON')
     .action((id: string, options) => {
       const success = cacheService.removePreference(parseInt(id, 10));

@@ -8,9 +8,9 @@ import { logger } from '../utils/logger.js';
 
 export function createUpdateCommand(): Command {
   const update = new Command('update')
-    .description('Fetch updates from RSS feeds')
-    .option('-f, --feed <id>', 'Update specific feed by ID')
-    .option('-a, --all', 'Update all feeds')
+    .description('从 RSS 订阅源获取更新')
+    .option('-f, --feed <id>', '更新指定 ID 的订阅源')
+    .option('-a, --all', '更新所有订阅源')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       const spinner = ora('Fetching updates...').start();
