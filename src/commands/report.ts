@@ -33,7 +33,7 @@ function getTrend(count: number): string {
   return '📉';
 }
 
-function generateMarkdown(data: ReportData): string {
+function generateMarkdown(data: ReportData, briefSummaries?: Map<number, string>): string {
   const lines: string[] = [];
 
   lines.push('# RSS 技术周报');
@@ -86,7 +86,9 @@ function generateMarkdown(data: ReportData): string {
       lines.push(`> 来源: ${article.feed_name} | ${date}`);
       lines.push('');
       if (article.summary) {
-        lines.push(article.summary);
+        // 优先使用简短摘要，否则截取原摘要
+        const brief = briefSummaries?.get(article.id) || article.summary.slice(0, 80);
+        lines.push(brief);
         lines.push('');
       }
       if (article.link) {
@@ -206,10 +208,17 @@ JSON 数据结构:
         // Generate overview with LLM
         if (spinner) spinner.text = 'Generating overview with LLM...';
         let overview = '暂无概览';
+        let briefSummaries: Map<number, string> | undefined;
         const hasLlmKey = process.env.OPENAI_API_KEY;
         if (hasLlmKey && articles.length > 0) {
           try {
             overview = await llmService.generateOverallSummary(articles, resources, allTags, days);
+
+            // Generate brief summaries for articles
+            if (spinner) spinner.text = 'Generating brief summaries...';
+            briefSummaries = await llmService.generateBriefSummaries(
+              articles.slice(0, 15).map(a => ({ id: a.id, title: a.title, summary: a.summary }))
+            );
           } catch (err) {
             console.error('LLM error:', (err as Error).message);
             overview = `本期共收录 ${articles.length} 篇精选文章，涵盖 ${tags.length} 个技术话题。`;
@@ -239,7 +248,7 @@ JSON 数据结构:
             console.log(output);
           }
         } else {
-          const markdown = generateMarkdown(reportData);
+          const markdown = generateMarkdown(reportData, briefSummaries);
           if (options.output) {
             writeFileSync(options.output, markdown, 'utf-8');
             console.log(chalk.green(`Report saved to ${options.output}`));

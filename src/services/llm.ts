@@ -127,8 +127,23 @@ export class LlmService {
         console.error('[LLM] Request timeout after 120s');
         throw new Error('Request timeout');
       }
-      console.error('[LLM] Fetch error:', (err as Error).message);
-      throw err;
+
+      const error = err as Error;
+      let detailedMessage = error.message;
+
+      // 提取 Node.js fetch 底层错误详情
+      if ('cause' in error && error.cause) {
+        const cause = error.cause as { code?: string; message?: string };
+        if (cause.code) {
+          detailedMessage += ` (${cause.code})`;
+        }
+        if (cause.message && cause.message !== error.message) {
+          detailedMessage += `: ${cause.message}`;
+        }
+      }
+
+      console.error('[LLM] Fetch error:', detailedMessage);
+      throw new Error(`LLM request failed: ${detailedMessage}`);
     }
   }
 
@@ -540,8 +555,9 @@ ${truncatedContent}
       `- ${a.title}${a.summary ? `: ${a.summary.slice(0, 100)}` : ''}`
     ).join('\n');
 
-    const prompt = `你是一个技术周报编辑。请根据以下信息，生成一段200-400字的技术周报概览。
+    const prompt = `你是一个技术周报编辑，负责帮助用户快速了解本周技术动态。
 
+## 输入数据
 时间范围: 最近 ${days} 天
 精选文章数: ${articles.length} 篇
 热门话题: ${topTags}
@@ -550,17 +566,65 @@ ${truncatedContent}
 部分精选文章:
 ${articleSummaries}
 
-要求:
-1. 总结本期主要技术动态和趋势
-2. 指出值得关注的技术方向
-3. 推荐1-2个值得关注的项目或工具
-4. 语言简洁专业，适合技术人员阅读
-5. 只返回概览文本，不要有标题或其他格式
+## 输出要求
+请生成一段 **150-250 字** 的技术周报概览，要求：
 
-请生成概览:`;
+1. **信息密度高**：每句话都要有信息量，避免空洞的描述
+2. **突出重点**：
+   - 本周最值得关注的 2-3 个技术动态
+   - 如果有知名项目/服务的重大更新（如 Claude、GitHub、React 等），要特别提及
+3. **可操作性**：推荐 1-2 个值得立即尝试的项目或工具
+4. **语言风格**：简洁专业，适合技术人员在 1 分钟内快速浏览
+
+只返回概览文本，不要有标题或其他格式。`;
 
     const content = await this.chatCompletion([{ role: 'user', content: prompt }]);
     return content.trim() || `本期共收录 ${articles.length} 篇精选文章。`;
+  }
+
+  async generateBriefSummaries(
+    articles: { id: number; title: string; summary?: string | null }[]
+  ): Promise<Map<number, string>> {
+    const result = new Map<number, string>();
+    if (articles.length === 0) return result;
+
+    const articlesText = articles.slice(0, 15).map(a =>
+      `[${a.id}] ${a.title}\n原摘要: ${a.summary?.slice(0, 200) || '无'}`
+    ).join('\n\n');
+
+    const prompt = `请为以下文章生成简短摘要，每篇 **30-50 字**，突出核心信息。
+
+${articlesText}
+
+返回 JSON 格式：
+{
+  "summaries": [
+    { "id": <文章ID>, "brief": "30-50字简短摘要" }
+  ]
+}
+
+只返回 JSON，不要其他内容。`;
+
+    try {
+      const content = await this.chatCompletion([{ role: 'user', content: prompt }]);
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error('[LLM] No JSON found in brief summaries response');
+        return result;
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        summaries: { id: number; brief: string }[];
+      };
+
+      for (const item of parsed.summaries) {
+        result.set(item.id, item.brief);
+      }
+    } catch (error) {
+      console.error('[LLM] Failed to generate brief summaries:', (error as Error).message);
+    }
+
+    return result;
   }
 }
 
