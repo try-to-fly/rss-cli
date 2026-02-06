@@ -674,7 +674,7 @@ ${truncatedContent}
   async generateKnowledgePoints(
     articles: { title: string; summary?: string | null; feed_name: string; link?: string | null }[],
     days: number
-  ): Promise<{ points: string[]; highlights: { name: string; desc: string; url?: string }[] }> {
+  ): Promise<{ points: ({ text: string; url?: string } | string)[]; highlights: { name: string; desc: string; url?: string }[] }> {
     const articleSummaries = articles.map((a, i) =>
       `[${i + 1}] 标题: ${a.title}\n来源: ${a.feed_name}\n摘要: ${(a.summary || '').slice(0, 300)}\n链接: ${a.link || '无'}`
     ).join('\n\n');
@@ -708,7 +708,10 @@ ${articleSummaries}
 
 返回 JSON：
 {
-  "points": ["知识点1", "知识点2", ...],
+  "points": [
+    { "text": "知识点一句话（<=40字）", "url": "原文链接（从文章中挑一个最相关的）" },
+    ...
+  ],
   "highlights": [
     { "name": "项目名", "desc": "一句话描述", "url": "链接" },
     ...
@@ -726,11 +729,20 @@ ${articleSummaries}
       }
 
       const parsed = JSON.parse(jsonMatch[0]) as {
-        points: string[];
+        points: ({ text: string; url?: string } | string)[];
         highlights: { name: string; desc: string; url?: string }[];
       };
+
+      // Backward compatibility: allow points to be string[]
+      const points = (parsed.points || []).map((p) => {
+        if (typeof p === 'string') return { text: p };
+        return p;
+      });
+
       return {
-        points: parsed.points || [],
+        // Return as string[] is handled by report generator; here we preserve structure in JSON
+        // but TypeScript signature expects string[] (kept elsewhere). The caller will render.
+        points: points as any,
         highlights: parsed.highlights || [],
       };
     } catch (error) {

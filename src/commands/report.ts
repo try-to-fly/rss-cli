@@ -24,7 +24,7 @@ export interface ResourceInsight {
 
 export interface ReportData {
   period: { start: string; end: string; days: number };
-  knowledgePoints: string[];
+  knowledgePoints: ({ text: string; url?: string } | string)[];
   highlights: { name: string; desc: string; url?: string }[];
   tags: { name: string; count: number; trend: string }[];
   resourceInsights: ResourceInsight[];
@@ -55,7 +55,12 @@ export function generateMarkdown(data: ReportData): string {
   if (data.knowledgePoints.length > 0) {
     lines.push('## 要点速览');
     for (const point of data.knowledgePoints) {
-      lines.push(`- ${point}`);
+      if (typeof point === 'string') {
+        lines.push(`- ${point}`);
+      } else {
+        const link = point.url ? `[${point.text}](${point.url})` : point.text;
+        lines.push(`- ${link}`);
+      }
     }
     lines.push('');
   }
@@ -167,7 +172,7 @@ export async function generateReportData(options: GenerateReportOptions): Promis
     }));
 
   onProgress?.('Generating knowledge points with LLM...');
-  let knowledgePoints: string[] = [];
+  let knowledgePoints: ({ text: string; url?: string } | string)[] = [];
   let highlights: { name: string; desc: string; url?: string }[] = [];
   const hasLlmKey = process.env.OPENAI_API_KEY;
 
