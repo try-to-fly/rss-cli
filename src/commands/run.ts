@@ -1,28 +1,30 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
+import PQueue from "p-queue";
 import { rssService } from "../services/rss.js";
-import { llmService, type ProgressCallback } from "../services/llm.js";
+import { llmService, type ProgressCallback, type TokenUsage } from "../services/llm.js";
 import { cacheService } from "../services/cache.js";
 import { exportAnalyzedArticles, EXPORTS_DIR } from "../services/export.js";
 import { logger } from "../utils/logger.js";
+import type { Article } from "../models/article.js";
+import type { Feed } from "../models/feed.js";
+
+// 队列配置
+const RSS_CONCURRENCY = 5;  // RSS 采集并发数
+const LLM_CONCURRENCY = 1;  // LLM 分析并发数（API 通常有速率限制）
 
 export function createRunCommand(): Command {
   const run = new Command("run")
     .description("更新订阅源、分析文章并显示有趣的内容")
     .option("-d, --days <n>", "分析最近 N 天的文章", "3")
-    .option(
-      "-s, --summary",
-      "为有趣的文章生成摘要",
-      true,
-    )
-    .option(
-      "-f, --force",
-      "强制重新分析所有文章（忽略之前的分析结果）",
-    )
+    .option("-s, --summary", "为有趣的文章生成摘要", true)
+    .option("-f, --force", "强制重新分析所有文章（忽略之前的分析结果）")
     .option("--skip-update", "跳过订阅源更新")
     .option("--skip-analyze", "跳过 LLM 分析")
     .option("--json", "Output as JSON")
+    .option("--rss-concurrency <n>", "RSS 采集并发数", String(RSS_CONCURRENCY))
+    .option("--llm-concurrency <n>", "LLM 分析并发数", String(LLM_CONCURRENCY))
     .action(async (options) => {
       const results: {
         updated?: Record<string, { newCount: number; error?: string }>;
@@ -30,129 +32,180 @@ export function createRunCommand(): Command {
         articles?: unknown[];
       } = {};
 
+      const rssConcurrency = parseInt(options.rssConcurrency, 10) || RSS_CONCURRENCY;
+      const llmConcurrency = parseInt(options.llmConcurrency, 10) || LLM_CONCURRENCY;
+      const days = parseInt(options.days, 10);
+      const hasLlmKey = process.env.OPENAI_API_KEY;
+
       try {
-        // Step 1: Update feeds
-        if (!options.skipUpdate) {
-          const spinner = ora("Updating feeds...").start();
-          const updateResults = await rssService.updateAllFeeds();
+        // 创建两个独立的队列
+        const rssQueue = new PQueue({ concurrency: rssConcurrency });
+        const llmQueue = new PQueue({ concurrency: llmConcurrency });
 
-          let totalNew = 0;
-          const updateOutput: Record<
-            string,
-            { newCount: number; error?: string }
-          > = {};
+        // 状态追踪
+        const updateOutput: Record<string, { newCount: number; error?: string }> = {};
+        let totalNewArticles = 0;
+        let rssCompleted = 0;
+        let rssTotal = 0;
+        let llmTotalArticles = 0;
+        let llmAnalyzed = 0;
+        let llmInteresting = 0;
+        let llmPendingFeeds = 0;
+        const tokenUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
-          for (const [name, result] of updateResults) {
-            updateOutput[name] = result;
-            totalNew += result.newCount;
+        // Spinner 状态
+        const spinner = ora("初始化...").start();
+        const startTime = Date.now();
+
+        const updateSpinnerText = () => {
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          const parts: string[] = [];
+
+          if (!options.skipUpdate && rssTotal > 0) {
+            const rssStatus = rssCompleted === rssTotal ? "✓" : `${rssCompleted}/${rssTotal}`;
+            parts.push(`RSS: ${rssStatus} (+${totalNewArticles}篇)`);
           }
 
-          results.updated = updateOutput;
-          spinner.succeed(`Feeds updated: ${totalNew} new articles`);
-        }
+          if (!options.skipAnalyze && hasLlmKey && (llmTotalArticles > 0 || llmPendingFeeds > 0)) {
+            const llmStatus = llmPendingFeeds > 0
+              ? `${llmAnalyzed}篇 (队列:${llmPendingFeeds})`
+              : `${llmAnalyzed}篇`;
+            parts.push(`LLM: ${llmStatus} (${llmInteresting}篇有趣)`);
+          }
 
-        // Step 2: Analyze with LLM (if configured)
-        if (!options.skipAnalyze) {
-          const hasLlmKey = process.env.OPENAI_API_KEY;
+          if (tokenUsage.totalTokens > 0) {
+            parts.push(`${tokenUsage.totalTokens} tokens`);
+          }
 
-          if (hasLlmKey) {
-            const spinner = ora("Analyzing articles with LLM...").start();
-            const days = parseInt(options.days, 10);
+          if (parts.length > 0) {
+            spinner.text = `${parts.join(" | ")} [${elapsed}s]`;
+          }
+        };
 
-            // Get articles to analyze
-            let articles;
-            if (options.force) {
-              // Force mode: get all articles from the period
-              articles = cacheService.getArticles({ days, limit: 500 });
-              spinner.text = `Force re-analyzing ${articles.length} articles...`;
-            } else {
-              // Normal mode: only unanalyzed articles
-              articles = cacheService.getUnanalyzedArticles(undefined, days);
-            }
+        const timer = setInterval(updateSpinnerText, 500);
 
-            if (articles.length > 0) {
-              let lastProgress: {
-                phase: string;
-                current: number;
-                total: number;
-                title: string;
-                tokens: number;
-              } = {
-                phase: "filter",
-                current: 0,
-                total: articles.length,
-                title: "",
-                tokens: 0,
-              };
-              const startTime = Date.now();
+        try {
+          const feeds = cacheService.getAllFeeds();
+          rssTotal = feeds.length;
 
-              // Timer to show elapsed time
-              const updateSpinner = () => {
-                const elapsed = Math.floor((Date.now() - startTime) / 1000);
-                const timeStr = `${elapsed}s`;
-                const tokenInfo = `[${lastProgress.tokens} tokens | ${timeStr}]`;
+          if (!options.skipUpdate) {
+            spinner.text = `开始采集 ${rssTotal} 个订阅源...`;
+          }
 
-                if (lastProgress.phase === "filter") {
-                  spinner.text = `过滤文章中... ${tokenInfo}`;
-                } else {
-                  const title = lastProgress.title
-                    ? ` "${lastProgress.title}..."`
-                    : "";
-                  spinner.text = `摘要生成 (${lastProgress.current}/${lastProgress.total})${title} ${tokenInfo}`;
-                }
-              };
+          // 流水线处理：RSS 采集完成后立即加入 LLM 队列
+          const llmPromises: Promise<void>[] = [];
 
-              const timer = setInterval(updateSpinner, 1000);
+          const processRssFeed = async (feed: Feed) => {
+            let newArticles: Article[] = [];
 
-              // Progress callback to update spinner
-              const onProgress: ProgressCallback = (progress) => {
-                lastProgress = {
-                  phase: progress.phase,
-                  current: progress.current,
-                  total: progress.total,
-                  title: progress.articleTitle?.slice(0, 40) || "",
-                  tokens: progress.tokens.totalTokens,
-                };
-                updateSpinner();
-              };
-
+            // Step 1: RSS 采集
+            if (!options.skipUpdate) {
               try {
-                const analysisResults = await llmService.analyzeArticles(
-                  articles,
-                  options.summary,
-                  onProgress,
-                );
-                const interestingCount = analysisResults.filter(
-                  (r) => r.isInteresting,
-                ).length;
-
-                results.analyzed = {
-                  total: articles.length,
-                  interesting: interestingCount,
+                const newCount = await rssService.updateFeed(feed);
+                updateOutput[feed.name] = { newCount };
+                totalNewArticles += newCount;
+              } catch (error) {
+                updateOutput[feed.name] = {
+                  newCount: 0,
+                  error: (error as Error).message,
                 };
-
-                spinner.succeed(
-                  `Analyzed ${articles.length} articles: ${interestingCount} interesting`,
-                );
               } finally {
-                clearInterval(timer);
+                rssCompleted++;
+                updateSpinnerText();
               }
-            } else {
-              spinner.info("No unanalyzed articles found");
-              results.analyzed = { total: 0, interesting: 0 };
             }
-          } else {
-            if (!options.json) {
-              logger.warn(
-                "LLM not configured. Skipping analysis. Use: rss config set openai_api_key <key>",
-              );
+
+            // Step 2: 获取该 feed 的待分析文章（无论是否有新文章）
+            if (!options.skipAnalyze && hasLlmKey) {
+              if (options.force) {
+                newArticles = cacheService.getArticles({ feedId: feed.id, days, limit: 100 });
+              } else {
+                newArticles = cacheService.getUnanalyzedArticles(feed.id, days);
+              }
             }
+
+            // Step 2: 将文章加入 LLM 队列
+            if (newArticles.length > 0 && !options.skipAnalyze && hasLlmKey) {
+              llmTotalArticles += newArticles.length;
+              llmPendingFeeds++;
+              updateSpinnerText();
+
+              const llmPromise = llmQueue.add(async () => {
+                try {
+                  const onProgress: ProgressCallback = (progress) => {
+                    if (progress.phase === "summarize") {
+                      // 更新 token 使用量
+                      tokenUsage.promptTokens = progress.tokens.promptTokens;
+                      tokenUsage.completionTokens = progress.tokens.completionTokens;
+                      tokenUsage.totalTokens = progress.tokens.totalTokens;
+                    }
+                    updateSpinnerText();
+                  };
+
+                  const analysisResults = await llmService.analyzeArticles(
+                    newArticles,
+                    options.summary,
+                    onProgress,
+                  );
+
+                  const interesting = analysisResults.filter((r) => r.isInteresting).length;
+                  llmAnalyzed += newArticles.length;
+                  llmInteresting += interesting;
+                } catch (error) {
+                  logger.error(`[LLM] ${feed.name}: ${(error as Error).message}`);
+                } finally {
+                  llmPendingFeeds--;
+                  updateSpinnerText();
+                }
+              });
+
+              llmPromises.push(llmPromise as Promise<void>);
+            }
+          };
+
+          // 将所有 feed 加入 RSS 队列
+          const rssPromises = feeds.map((feed) => rssQueue.add(() => processRssFeed(feed)));
+
+          // 等待所有 RSS 采集完成
+          await Promise.all(rssPromises);
+          results.updated = updateOutput;
+
+          // 等待所有 LLM 分析完成
+          if (llmPromises.length > 0) {
+            await Promise.all(llmPromises);
           }
+
+          results.analyzed = {
+            total: llmAnalyzed,
+            interesting: llmInteresting,
+          };
+
+          if (!options.skipAnalyze && !hasLlmKey && !options.json) {
+            logger.warn(
+              "LLM not configured. Skipping analysis. Use: rss config set openai_api_key <key>",
+            );
+          }
+        } finally {
+          clearInterval(timer);
         }
+
+        // 完成信息
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const summaryParts: string[] = [];
+
+        if (!options.skipUpdate) {
+          summaryParts.push(`采集完成: +${totalNewArticles}篇新文章`);
+        }
+        if (results.analyzed && results.analyzed.total > 0) {
+          summaryParts.push(`分析完成: ${results.analyzed.interesting}/${results.analyzed.total}篇有趣`);
+        }
+        if (tokenUsage.totalTokens > 0) {
+          summaryParts.push(`${tokenUsage.totalTokens} tokens`);
+        }
+
+        spinner.succeed(`${summaryParts.join(" | ")} [${elapsed}s]`);
 
         // Step 3: Export analyzed articles
-        const days = parseInt(options.days, 10);
-
         if (!options.json) {
           const exportSpinner = ora("Exporting articles...").start();
           const exportCount = exportAnalyzedArticles(days);
