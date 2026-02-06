@@ -146,9 +146,9 @@ export class ScraperService {
       }
 
       return {
-        title: article.title,
-        content: article.content,
-        textContent: article.textContent,
+        title: article.title || '',
+        content: article.content || '',
+        textContent: article.textContent || '',
         byline: article.byline || undefined,
         excerpt: article.excerpt || undefined,
       };
