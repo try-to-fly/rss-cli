@@ -11,7 +11,7 @@ const ENV_KEY_MAP: Record<string, string> = {
 
 // Default values for config keys
 const DEFAULT_VALUES: Record<string, string> = {
-  llm_model: 'gpt-5.3-codex',
+  llm_model: 'gpt-5.2',
   proxy_url: 'http://127.0.0.1:7890',
 };
 
