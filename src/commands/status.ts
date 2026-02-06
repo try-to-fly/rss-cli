@@ -199,6 +199,7 @@ function printColoredStatus(data: StatusData): void {
 
 export function createStatusCommand(): Command {
   const status = new Command('status')
+    .summary('查看整体运行状态和统计数据')
     .description(`查看 RSS CLI 的整体运行状态和统计数据。
 
 用途说明:

@@ -83,6 +83,7 @@ function getPeriodLabel(period: string): string {
 
 export function createReportListCommand(): Command {
   const reportList = new Command('report-list')
+    .summary('查看已生成的报告列表')
     .description(`查看已生成的报告列表。
 
 用途说明:

@@ -50,6 +50,7 @@ function shouldRun(state: CronState, intervalHours: number): boolean {
 
 export function createCronCommand(): Command {
   const cron = new Command('cron')
+    .summary('定时任务命令，用于 crontab 自动化调度')
     .description(`定时任务命令，用于 crontab 自动化调度。
 
 用途说明:

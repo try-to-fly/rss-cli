@@ -77,6 +77,7 @@ function getReportFileName(period: string, days: number): string {
 
 export function createReportCronCommand(): Command {
   const reportCron = new Command('report-cron')
+    .summary('定时生成报告命令，用于 crontab 自动化调度')
     .description(`定时生成报告命令，用于 crontab 自动化调度。
 
 用途说明:

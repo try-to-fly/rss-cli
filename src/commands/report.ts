@@ -202,6 +202,7 @@ export async function generateReportData(options: GenerateReportOptions): Promis
 
 export function createReportCommand(): Command {
   const report = new Command('report')
+    .summary('生成指定时间范围内的综合摘要报告')
     .description(`生成指定时间范围内的综合摘要报告。
 
 用途说明:

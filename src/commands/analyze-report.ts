@@ -447,6 +447,7 @@ function printSamples(samples: ArticleSample[]): void {
 
 export function createAnalyzeReportCommand(): Command {
   const analyzeReport = new Command('analyze-report')
+    .summary('分析智能分析效果并生成报告')
     .description(`分析智能分析效果并生成报告。
 
 用途说明:
