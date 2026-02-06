@@ -15,8 +15,16 @@ import type { Feed } from "../models/feed.js";
 const RSS_CONCURRENCY = 5;  // RSS 采集并发数
 const LLM_CONCURRENCY = 1;  // LLM 分析并发数（API 通常有速率限制）
 
-// 当前默认：尽量抓取每篇文章正文
-function needsScraping(): boolean {
+// 当前默认：抓取没有正文快照的文章
+function needsScraping(article: Article): boolean {
+  // 如果已有正文快照且长度足够，跳过
+  if (article.text_snapshot && article.text_snapshot.length > 200) {
+    return false;
+  }
+  // 如果没有链接，无法抓取
+  if (!article.link) {
+    return false;
+  }
   return true;
 }
 
@@ -54,49 +62,93 @@ export function createRunCommand(): Command {
         let totalNewArticles = 0;
         let rssCompleted = 0;
         let rssTotal = 0;
+        let scrapedArticles = 0;
+        let scrapeTotal = 0;
+        let scrapeErrors = 0;
         let llmTotalArticles = 0;
         let llmAnalyzed = 0;
         let llmInteresting = 0;
         let llmPendingFeeds = 0;
         const tokenUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
-        // Spinner 状态
-        const spinner = ora("初始化...").start();
+        // 多行进度显示
         const startTime = Date.now();
+        let progressLines: string[] = [];
 
-        const updateSpinnerText = () => {
+        const updateProgress = () => {
           const elapsed = Math.floor((Date.now() - startTime) / 1000);
-          const parts: string[] = [];
+          const lines: string[] = [];
 
+          // 第一行：RSS 抓取进度
           if (!options.skipUpdate && rssTotal > 0) {
-            const rssStatus = rssCompleted === rssTotal ? "✓" : `${rssCompleted}/${rssTotal}`;
-            parts.push(`RSS: ${rssStatus} (+${totalNewArticles}篇)`);
+            const rssPercent = Math.floor((rssCompleted / rssTotal) * 100);
+            const rssBar = '█'.repeat(Math.floor(rssPercent / 5)) + '░'.repeat(20 - Math.floor(rssPercent / 5));
+            const rssStatus = rssCompleted === rssTotal ? chalk.green('✓') : chalk.yellow('⟳');
+            lines.push(
+              `${rssStatus} RSS 抓取: [${rssBar}] ${rssCompleted}/${rssTotal} (+${totalNewArticles}篇新文章)`
+            );
           }
 
-          if (!options.skipAnalyze && hasLlmKey && (llmTotalArticles > 0 || llmPendingFeeds > 0)) {
-            const llmStatus = llmPendingFeeds > 0
-              ? `${llmAnalyzed}篇 (队列:${llmPendingFeeds})`
-              : `${llmAnalyzed}篇`;
-            parts.push(`LLM: ${llmStatus} (${llmInteresting}篇有趣)`);
+          // 第二行：正文解析进度
+          if (!options.skipScrape && scrapeTotal > 0) {
+            const scrapePercent = Math.floor((scrapedArticles / scrapeTotal) * 100);
+            const scrapeBar = '█'.repeat(Math.floor(scrapePercent / 5)) + '░'.repeat(20 - Math.floor(scrapePercent / 5));
+            const scrapeStatus = scrapedArticles === scrapeTotal ? chalk.green('✓') : chalk.yellow('⟳');
+            const errorText = scrapeErrors > 0 ? chalk.red(` (${scrapeErrors}失败)`) : '';
+            lines.push(
+              `${scrapeStatus} 正文解析: [${scrapeBar}] ${scrapedArticles}/${scrapeTotal}${errorText}`
+            );
           }
 
-          if (tokenUsage.totalTokens > 0) {
-            parts.push(`${tokenUsage.totalTokens} tokens`);
+          // 第三行：LLM 分析进度
+          if (!options.skipAnalyze && hasLlmKey && llmTotalArticles > 0) {
+            const llmPercent = llmTotalArticles > 0 ? Math.floor((llmAnalyzed / llmTotalArticles) * 100) : 0;
+            const llmBar = '█'.repeat(Math.floor(llmPercent / 5)) + '░'.repeat(20 - Math.floor(llmPercent / 5));
+            const llmStatus = llmAnalyzed === llmTotalArticles ? chalk.green('✓') : chalk.yellow('⟳');
+            const queueText = llmPendingFeeds > 0 ? ` (队列:${llmPendingFeeds})` : '';
+            lines.push(
+              `${llmStatus} LLM 分析: [${llmBar}] ${llmAnalyzed}/${llmTotalArticles} (${chalk.green(llmInteresting)}篇有趣)${queueText}`
+            );
           }
 
-          if (parts.length > 0) {
-            spinner.text = `${parts.join(" | ")} [${elapsed}s]`;
+          // 第四行：Token 使用和耗时
+          if (tokenUsage.totalTokens > 0 || elapsed > 0) {
+            const parts: string[] = [];
+            if (tokenUsage.totalTokens > 0) {
+              parts.push(`Tokens: ${tokenUsage.totalTokens.toLocaleString()}`);
+            }
+            parts.push(`耗时: ${elapsed}s`);
+            lines.push(chalk.dim(`  ${parts.join(' | ')}`));
           }
+
+          // 清除之前的行并输出新的进度
+          if (progressLines.length > 0) {
+            // 向上移动光标并清除行
+            process.stdout.write('\x1b[' + progressLines.length + 'A');
+            for (let i = 0; i < progressLines.length; i++) {
+              process.stdout.write('\x1b[2K\r');
+              if (i < progressLines.length - 1) {
+                process.stdout.write('\n');
+              }
+            }
+            process.stdout.write('\x1b[' + progressLines.length + 'A');
+          }
+
+          // 输出新的进度
+          console.log(lines.join('\n'));
+          progressLines = lines;
         };
 
-        const timer = setInterval(updateSpinnerText, 500);
+        // 初始显示
+        console.log(chalk.bold.cyan('\n开始处理...\n'));
+        const timer = setInterval(updateProgress, 200);
 
         try {
           const feeds = cacheService.getAllFeeds();
           rssTotal = feeds.length;
 
           if (!options.skipUpdate) {
-            spinner.text = `开始采集 ${rssTotal} 个订阅源...`;
+            updateProgress();
           }
 
           // 流水线处理：RSS 采集完成后立即加入 LLM 队列
@@ -118,7 +170,7 @@ export function createRunCommand(): Command {
                 };
               } finally {
                 rssCompleted++;
-                updateSpinnerText();
+                updateProgress();
               }
             }
 
@@ -133,11 +185,12 @@ export function createRunCommand(): Command {
 
             // Step 2.5: 对内容不完整的文章抓取正文
             if (newArticles.length > 0 && !options.skipScrape) {
-              const articlesToScrape = newArticles.filter(
-                a => a.link && needsScraping()
-              );
+              const articlesToScrape = newArticles.filter(a => needsScraping(a));
 
               if (articlesToScrape.length > 0) {
+                scrapeTotal += articlesToScrape.length;
+                updateProgress();
+
                 for (const article of articlesToScrape) {
                   try {
                     const scraped = await scraperService.fetchArticleContent(article.link!);
@@ -145,8 +198,11 @@ export function createRunCommand(): Command {
                       cacheService.saveArticleSnapshot(article.id, scraped.textContent);
                       article.text_snapshot = scraped.textContent;
                     }
+                    scrapedArticles++;
                   } catch (err) {
-                    // 抓取失败不影响后续流程
+                    scrapeErrors++;
+                  } finally {
+                    updateProgress();
                   }
                 }
               }
@@ -156,7 +212,7 @@ export function createRunCommand(): Command {
             if (newArticles.length > 0 && !options.skipAnalyze && hasLlmKey) {
               llmTotalArticles += newArticles.length;
               llmPendingFeeds++;
-              updateSpinnerText();
+              updateProgress();
 
               const llmPromise = llmQueue.add(async () => {
                 try {
@@ -167,7 +223,7 @@ export function createRunCommand(): Command {
                       tokenUsage.completionTokens = progress.tokens.completionTokens;
                       tokenUsage.totalTokens = progress.tokens.totalTokens;
                     }
-                    updateSpinnerText();
+                    updateProgress();
                   };
 
                   const analysisResults = await llmService.analyzeArticles(
@@ -183,7 +239,7 @@ export function createRunCommand(): Command {
                   logger.error(`[LLM] ${feed.name}: ${(error as Error).message}`);
                 } finally {
                   llmPendingFeeds--;
-                  updateSpinnerText();
+                  updateProgress();
                 }
               });
 
@@ -215,6 +271,9 @@ export function createRunCommand(): Command {
           }
         } finally {
           clearInterval(timer);
+          // 最后一次更新进度
+          updateProgress();
+          console.log(); // 空行
           // 关闭 scraper 浏览器
           await scraperService.close();
         }
@@ -224,24 +283,27 @@ export function createRunCommand(): Command {
         const summaryParts: string[] = [];
 
         if (!options.skipUpdate) {
-          summaryParts.push(`采集完成: +${totalNewArticles}篇新文章`);
+          summaryParts.push(chalk.green(`✓ RSS 抓取: +${totalNewArticles}篇新文章`));
+        }
+        if (scrapeTotal > 0) {
+          const scrapeSuccess = scrapedArticles - scrapeErrors;
+          summaryParts.push(chalk.green(`✓ 正文解析: ${scrapeSuccess}/${scrapeTotal}篇成功`));
         }
         if (results.analyzed && results.analyzed.total > 0) {
-          summaryParts.push(`分析完成: ${results.analyzed.interesting}/${results.analyzed.total}篇有趣`);
+          summaryParts.push(chalk.green(`✓ LLM 分析: ${results.analyzed.interesting}/${results.analyzed.total}篇有趣`));
         }
         if (tokenUsage.totalTokens > 0) {
-          summaryParts.push(`${tokenUsage.totalTokens} tokens`);
+          summaryParts.push(chalk.dim(`${tokenUsage.totalTokens.toLocaleString()} tokens`));
         }
 
-        spinner.succeed(`${summaryParts.join(" | ")} [${elapsed}s]`);
+        console.log(chalk.bold.green('\n处理完成！'));
+        console.log(summaryParts.join('\n'));
+        console.log(chalk.dim(`总耗时: ${elapsed}s\n`));
 
         // Step 3: Export analyzed articles
         if (!options.json) {
-          const exportSpinner = ora("Exporting articles...").start();
           const exportCount = exportAnalyzedArticles(days);
-          exportSpinner.succeed(
-            `Exported ${exportCount} articles to ${EXPORTS_DIR}`,
-          );
+          console.log(chalk.dim(`已导出 ${exportCount} 篇文章到 ${EXPORTS_DIR}`));
         }
 
         // Step 4: Show interesting articles

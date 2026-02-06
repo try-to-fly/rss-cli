@@ -143,7 +143,7 @@ function formatDateTime(isoString: string | null): string {
 
 function printColoredStatus(data: StatusData): void {
   console.log(chalk.bold.cyan('\n📊 RSS CLI 统计数据'));
-  console.log(chalk.gray('═'.repeat(60)));
+  console.log(chalk.gray('-'.repeat(60)));
 
   // RSS 源
   console.log(chalk.bold('\n📡 RSS 源'));
@@ -193,7 +193,7 @@ function printColoredStatus(data: StatusData): void {
   console.log(`  代理成功: ${chalk.green(data.scraping.proxySuccess)}`);
   console.log(`  直连成功: ${chalk.green(data.scraping.directSuccess)}`);
 
-  console.log(chalk.gray('\n═'.repeat(60)));
+  console.log(chalk.gray('\n' + '-'.repeat(60)));
   console.log(chalk.gray('提示: 使用 --json 选项获取 JSON 格式输出\n'));
 }
 
