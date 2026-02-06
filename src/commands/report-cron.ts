@@ -107,7 +107,7 @@ export function createReportCronCommand(): Command {
   0 0 * * 0 rss report-cron --quiet >> ~/.rss-cli/report-cron.log 2>&1`)
     .option('-p, --period <period>', '预设时间范围: day(1天), week(7天), month(30天)', 'week')
     .option('-d, --days <n>', '自定义天数（覆盖 --period 设置）')
-    .option('-i, --interval <hours>', '最小运行间隔（小时），未达间隔则跳过执行', '24')
+    .option('-i, --interval <hours>', '最小运行间隔（小时），未达间隔则跳过执行', '1')
     .option('--force', '忽略间隔检查，强制执行')
     .option('--quiet', '静默模式：不显示进度，仅输出最终 JSON 结果')
     .option('--no-resources', '不包含热门资源章节')
