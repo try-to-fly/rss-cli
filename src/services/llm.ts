@@ -2,6 +2,8 @@ import { cacheService } from './cache.js';
 import { convert } from 'html-to-text';
 import type { Article } from '../models/article.js';
 import type { SummaryWithResources, ExtractedResource, Resource, ResourceInput } from '../models/resource.js';
+import { getConfig } from '../utils/config.js';
+import { CONFIG_KEYS } from '../models/config.js';
 
 // HTML 转纯文本
 function htmlToPlainText(html: string): string {
@@ -43,7 +45,7 @@ function normalizeResourceName(name: string): string {
 function getLlmConfig() {
   const apiKey = process.env.OPENAI_API_KEY;
   const baseUrl = process.env.OPENAI_API_BASE;
-  const model = process.env.LLM_MODEL;
+  const model = getConfig(CONFIG_KEYS.LLM_MODEL);
 
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY not set in .env');
@@ -51,11 +53,8 @@ function getLlmConfig() {
   if (!baseUrl) {
     throw new Error('OPENAI_API_BASE not set in .env');
   }
-  if (!model) {
-    throw new Error('LLM_MODEL not set in .env');
-  }
 
-  return { apiKey, baseUrl, model };
+  return { apiKey, baseUrl, model: model! };
 }
 
 interface ChatMessage {

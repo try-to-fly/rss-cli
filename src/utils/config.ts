@@ -9,8 +9,14 @@ const ENV_KEY_MAP: Record<string, string> = {
   proxy_url: 'PROXY_URL',
 };
 
+// Default values for config keys
+const DEFAULT_VALUES: Record<string, string> = {
+  llm_model: 'gpt-5.3-codex',
+  proxy_url: 'http://127.0.0.1:7890',
+};
+
 export function getConfig(key: string): string | null {
-  // Priority: env > db
+  // Priority: env > db > default
   const envKey = ENV_KEY_MAP[key];
   if (envKey && process.env[envKey]) {
     return process.env[envKey]!;
@@ -18,7 +24,12 @@ export function getConfig(key: string): string | null {
 
   const sqlite = getSqlite();
   const row = sqlite.prepare('SELECT value FROM config WHERE key = ?').get(key) as Config | undefined;
-  return row?.value ?? null;
+  if (row?.value) {
+    return row.value;
+  }
+
+  // Return default value if available
+  return DEFAULT_VALUES[key] ?? null;
 }
 
 export function setConfig(key: string, value: string): void {
