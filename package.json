@@ -14,7 +14,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "prepare": "husky"
   },
   "keywords": [
     "rss",
@@ -49,6 +50,7 @@
     "@types/jsdom": "^27.0.0",
     "@types/node": "^20.0.0",
     "drizzle-kit": "^0.31.8",
+    "husky": "^9.1.7",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"
   }
