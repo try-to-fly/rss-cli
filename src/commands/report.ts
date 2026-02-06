@@ -6,15 +6,14 @@ import { cacheService } from '../services/cache.js';
 import { llmService } from '../services/llm.js';
 import type { ArticleWithFeed } from '../models/article.js';
 import type { ResourceWithStats } from '../models/resource.js';
-import type { TagWithCount } from '../models/tag.js';
 
-const PERIOD_DAYS: Record<string, number> = {
+export const PERIOD_DAYS: Record<string, number> = {
   day: 1,
   week: 7,
   month: 30,
 };
 
-interface ReportData {
+export interface ReportData {
   period: { start: string; end: string; days: number };
   overview: string;
   tags: { name: string; count: number; trend: string }[];
@@ -23,17 +22,17 @@ interface ReportData {
   feedStats: { name: string; total: number; interesting: number; rate: number }[];
 }
 
-function formatDate(date: Date): string {
+export function formatDate(date: Date): string {
   return date.toISOString().split('T')[0];
 }
 
-function getTrend(count: number): string {
+export function getTrend(count: number): string {
   if (count >= 10) return '📈';
   if (count >= 5) return '➡️';
   return '📉';
 }
 
-function generateMarkdown(data: ReportData, briefSummaries?: Map<number, string>): string {
+export function generateMarkdown(data: ReportData, briefSummaries?: Map<number, string>): string {
   const lines: string[] = [];
 
   lines.push('# RSS 技术周报');
@@ -113,7 +112,7 @@ function generateMarkdown(data: ReportData, briefSummaries?: Map<number, string>
   return lines.join('\n');
 }
 
-function getFeedStats(days: number): ReportData['feedStats'] {
+export function getFeedStats(days: number): ReportData['feedStats'] {
   const feeds = cacheService.getAllFeeds();
   const stats: ReportData['feedStats'] = [];
 
@@ -130,6 +129,68 @@ function getFeedStats(days: number): ReportData['feedStats'] {
   }
 
   return stats.sort((a, b) => b.interesting - a.interesting);
+}
+
+export interface GenerateReportOptions {
+  days: number;
+  includeResources?: boolean;
+  onProgress?: (msg: string) => void;
+}
+
+export interface GenerateReportResult {
+  data: ReportData;
+  briefSummaries?: Map<number, string>;
+}
+
+export async function generateReportData(options: GenerateReportOptions): Promise<GenerateReportResult> {
+  const { days, includeResources = true, onProgress } = options;
+  const endDate = new Date();
+  const startDate = new Date(endDate.getTime() - days * 24 * 60 * 60 * 1000);
+
+  const articles = cacheService.getArticles({ interesting: true, days, limit: 100 });
+  const resources = includeResources ? cacheService.getHotResources({ days, limit: 20 }) : [];
+  const allTags = cacheService.getTagsWithCounts();
+  const feedStats = getFeedStats(days);
+
+  const tags = allTags
+    .filter(t => t.article_count > 0)
+    .slice(0, 15)
+    .map(t => ({
+      name: t.name,
+      count: t.article_count,
+      trend: getTrend(t.article_count),
+    }));
+
+  onProgress?.('Generating overview with LLM...');
+  let overview = '暂无概览';
+  let briefSummaries: Map<number, string> | undefined;
+  const hasLlmKey = process.env.OPENAI_API_KEY;
+
+  if (hasLlmKey && articles.length > 0) {
+    try {
+      overview = await llmService.generateOverallSummary(articles, resources, allTags, days);
+      onProgress?.('Generating brief summaries...');
+      briefSummaries = await llmService.generateBriefSummaries(
+        articles.slice(0, 15).map(a => ({ id: a.id, title: a.title, summary: a.summary }))
+      );
+    } catch (err) {
+      console.error('LLM error:', (err as Error).message);
+      overview = `本期共收录 ${articles.length} 篇精选文章，涵盖 ${tags.length} 个技术话题。`;
+    }
+  } else if (articles.length > 0) {
+    overview = `本期共收录 ${articles.length} 篇精选文章，涵盖 ${tags.length} 个技术话题。`;
+  }
+
+  const data: ReportData = {
+    period: { start: formatDate(startDate), end: formatDate(endDate), days },
+    overview,
+    tags,
+    resources,
+    articles,
+    feedStats,
+  };
+
+  return { data, briefSummaries };
 }
 
 export function createReportCommand(): Command {
@@ -183,58 +244,17 @@ JSON 数据结构:
     .option('--json', '输出 JSON 格式而非 Markdown')
     .action(async (options) => {
       const days = options.days ? parseInt(options.days, 10) : (PERIOD_DAYS[options.period] || 7);
-      const endDate = new Date();
-      const startDate = new Date(endDate.getTime() - days * 24 * 60 * 60 * 1000);
 
       const spinner = options.json ? null : ora('Generating report...').start();
 
       try {
-        // Gather data
-        const articles = cacheService.getArticles({ interesting: true, days, limit: 100 });
-        const resources = options.resources !== false ? cacheService.getHotResources({ days, limit: 20 }) : [];
-        const allTags = cacheService.getTagsWithCounts();
-        const feedStats = getFeedStats(days);
-
-        // Filter tags with articles in this period
-        const tags = allTags
-          .filter(t => t.article_count > 0)
-          .slice(0, 15)
-          .map(t => ({
-            name: t.name,
-            count: t.article_count,
-            trend: getTrend(t.article_count),
-          }));
-
-        // Generate overview with LLM
-        if (spinner) spinner.text = 'Generating overview with LLM...';
-        let overview = '暂无概览';
-        let briefSummaries: Map<number, string> | undefined;
-        const hasLlmKey = process.env.OPENAI_API_KEY;
-        if (hasLlmKey && articles.length > 0) {
-          try {
-            overview = await llmService.generateOverallSummary(articles, resources, allTags, days);
-
-            // Generate brief summaries for articles
-            if (spinner) spinner.text = 'Generating brief summaries...';
-            briefSummaries = await llmService.generateBriefSummaries(
-              articles.slice(0, 15).map(a => ({ id: a.id, title: a.title, summary: a.summary }))
-            );
-          } catch (err) {
-            console.error('LLM error:', (err as Error).message);
-            overview = `本期共收录 ${articles.length} 篇精选文章，涵盖 ${tags.length} 个技术话题。`;
-          }
-        } else if (articles.length > 0) {
-          overview = `本期共收录 ${articles.length} 篇精选文章，涵盖 ${tags.length} 个技术话题。`;
-        }
-
-        const reportData: ReportData = {
-          period: { start: formatDate(startDate), end: formatDate(endDate), days },
-          overview,
-          tags,
-          resources,
-          articles,
-          feedStats,
-        };
+        const { data: reportData, briefSummaries } = await generateReportData({
+          days,
+          includeResources: options.resources !== false,
+          onProgress: (msg) => {
+            if (spinner) spinner.text = msg;
+          },
+        });
 
         spinner?.succeed('Report generated');
 

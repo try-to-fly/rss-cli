@@ -12,6 +12,9 @@ import { createResourceCommand } from './commands/resource.js';
 import { createTagCommand } from './commands/tag.js';
 import { createCronCommand } from './commands/cron.js';
 import { createReportCommand } from './commands/report.js';
+import { createReportCronCommand } from './commands/report-cron.js';
+import { createReportListCommand } from './commands/report-list.js';
+import { createResetCommand } from './commands/reset.js';
 import { closeDb } from './db/index.js';
 
 const program = new Command();
@@ -35,6 +38,9 @@ program.addCommand(createResourceCommand());
 program.addCommand(createTagCommand());
 program.addCommand(createCronCommand());
 program.addCommand(createReportCommand());
+program.addCommand(createReportCronCommand());
+program.addCommand(createReportListCommand());
+program.addCommand(createResetCommand());
 
 // Handle errors
 program.exitOverride();
