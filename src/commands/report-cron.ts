@@ -155,7 +155,7 @@ export function createReportCronCommand(): Command {
         const spinner = quiet ? null : ora('生成报告中...').start();
 
         // Generate report data
-        const { data: reportData, briefSummaries } = await generateReportData({
+        const { data: reportData } = await generateReportData({
           days,
           includeResources: options.resources !== false,
           onProgress: (msg) => {
@@ -166,7 +166,7 @@ export function createReportCronCommand(): Command {
         result.articlesCount = reportData.articles.length;
 
         // Generate markdown
-        const markdown = generateMarkdown(reportData, briefSummaries);
+        const markdown = generateMarkdown(reportData);
 
         // Save report file
         const fileName = getReportFileName(period, days);

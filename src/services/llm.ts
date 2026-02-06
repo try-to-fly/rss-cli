@@ -672,43 +672,72 @@ ${truncatedContent}
     return results;
   }
 
-  async generateOverallSummary(
-    articles: { title: string; summary?: string | null; feed_name: string }[],
-    resources: { name: string; type: string; description?: string | null }[],
-    tags: { name: string; article_count: number }[],
+  async generateKnowledgePoints(
+    articles: { title: string; summary?: string | null; feed_name: string; link?: string | null }[],
     days: number
-  ): Promise<string> {
-    const topTags = tags.slice(0, 10).map(t => `${t.name}(${t.article_count}篇)`).join('、');
-    const topResources = resources.slice(0, 5).map(r => r.name).join('、');
-    const articleSummaries = articles.slice(0, 10).map(a =>
-      `- ${a.title}${a.summary ? `: ${a.summary.slice(0, 100)}` : ''}`
-    ).join('\n');
+  ): Promise<{ points: string[]; highlights: { name: string; desc: string; url?: string }[] }> {
+    const articleSummaries = articles.map((a, i) =>
+      `[${i + 1}] 标题: ${a.title}\n来源: ${a.feed_name}\n摘要: ${(a.summary || '').slice(0, 300)}\n链接: ${a.link || '无'}`
+    ).join('\n\n');
 
-    const prompt = `你是一个技术周报编辑，负责帮助用户快速了解本周技术动态。
+    const prompt = `你是一个技术信息提炼专家。以下是最近 ${days} 天的 ${articles.length} 篇精选技术文章的标题和摘要。
 
-## 输入数据
-时间范围: 最近 ${days} 天
-精选文章数: ${articles.length} 篇
-热门话题: ${topTags}
-热门资源: ${topResources}
+请完成两个任务：
 
-部分精选文章:
+## 任务一：提炼知识点（15-20 条）
+
+从所有文章中提炼出最有价值的知识点，要求：
+1. 每条知识点一句话，不超过 40 个字
+2. 包含具体信息（技术名称、版本号、关键特性等）
+3. 跨文章去重合并——如果多篇文章讨论同一话题，只保留一条
+4. 不标注来源文章
+5. 周刊/Newsletter 类文章中的多个知识点应拆解为独立条目
+6. 按重要性排序
+
+## 任务二：挑选值得关注的项目/工具（3-8 个）
+
+从文章中挑选值得关注的具体项目、工具或库，要求：
+1. 必须是具体的项目/工具/库，不是概念或趋势
+2. 每个包含：名称、一句话描述（不超过 30 字）、链接（从文章中提取）
+3. 优先选择新发布或有重大更新的项目
+
+## 文章列表
+
 ${articleSummaries}
 
-## 输出要求
-请生成一段 **150-250 字** 的技术周报概览，要求：
+## 输出格式
 
-1. **信息密度高**：每句话都要有信息量，避免空洞的描述
-2. **突出重点**：
-   - 本周最值得关注的 2-3 个技术动态
-   - 如果有知名项目/服务的重大更新（如 Claude、GitHub、React 等），要特别提及
-3. **可操作性**：推荐 1-2 个值得立即尝试的项目或工具
-4. **语言风格**：简洁专业，适合技术人员在 1 分钟内快速浏览
+返回 JSON：
+{
+  "points": ["知识点1", "知识点2", ...],
+  "highlights": [
+    { "name": "项目名", "desc": "一句话描述", "url": "链接" },
+    ...
+  ]
+}
 
-只返回概览文本，不要有标题或其他格式。`;
+只返回 JSON，不要其他内容。`;
 
-    const content = await this.chatCompletion([{ role: 'user', content: prompt }]);
-    return content.trim() || `本期共收录 ${articles.length} 篇精选文章。`;
+    try {
+      const content = await this.chatCompletion([{ role: 'user', content: prompt }]);
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error('[LLM] No JSON found in knowledge points response');
+        return { points: [], highlights: [] };
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        points: string[];
+        highlights: { name: string; desc: string; url?: string }[];
+      };
+      return {
+        points: parsed.points || [],
+        highlights: parsed.highlights || [],
+      };
+    } catch (error) {
+      console.error('[LLM] Failed to parse knowledge points JSON:', (error as Error).message);
+      return { points: [], highlights: [] };
+    }
   }
 
   async generateBriefSummaries(
