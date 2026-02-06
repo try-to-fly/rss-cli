@@ -15,6 +15,30 @@ function htmlToPlainText(html: string): string {
   });
 }
 
+// 标准化资源名称
+function normalizeResourceName(name: string): string {
+  // 移除公司名后缀
+  const patterns = [
+    /\s*\(Anthropic\)$/i,
+    /\s*\(Google\)$/i,
+    /\s*\(OpenAI\)$/i,
+    /\s*\(Microsoft\)$/i,
+    /\s*\(Meta\)$/i,
+    /\s*\(Facebook\)$/i,
+    /\s*\(Amazon\)$/i,
+    /\s*\(Apple\)$/i,
+    /\s*\(Netflix\)$/i,
+    /\s*\(Vercel\)$/i,
+    /\s*\(GitHub\)$/i,
+    /\s*by\s+\w+$/i,
+  ];
+  let normalized = name.trim();
+  for (const pattern of patterns) {
+    normalized = normalized.replace(pattern, '');
+  }
+  return normalized.trim();
+}
+
 // 直接从环境变量读取 LLM 配置
 function getLlmConfig() {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -181,19 +205,22 @@ ${preferencesText}
 - GitHub 热门项目介绍
 - 编程语言新特性、版本更新
 - 技术架构设计、最佳实践分享
-- AI/ML 工具和应用实践
+- AI/ML 工具和应用实践（包含技术细节的案例）
 - 云原生、DevOps 技术文章
 - 性能优化、安全实践
 - 深度技术分析文章
 - 技术周刊/Newsletter（通常包含大量技术资源）
+- **独立开发者/创业者的技术实践分享（有技术细节）**
+- **开源项目的开发历程与技术决策**
 
 ### 低价值内容（标记 interesting: false）:
-- 纯营销广告、产品推广
+- 纯营销广告、产品推广（无任何技术细节）
 - 公司新闻、招聘信息
 - 非技术话题（生活、娱乐等）
-- 过于基础的入门教程
+- 过于基础的入门教程（面向完全初学者）
 - 重复或过时的内容
 - 纯新闻报道（无技术深度）
+- **注意：如果文章包含技术实现细节，即使是产品介绍也应标记为有趣**
 
 请为每篇文章提供以下 JSON 格式的结果:
 {
@@ -283,7 +310,11 @@ ${articlesText}
   }
 
   async addOrUpdateResourceWithMerge(input: ResourceInput): Promise<Resource> {
-    const existing = cacheService.getResourceByNameAndType(input.name, input.type);
+    // 标准化资源名称
+    const normalizedName = normalizeResourceName(input.name);
+    const normalizedInput = { ...input, name: normalizedName };
+
+    const existing = cacheService.getResourceByNameAndType(normalizedName, input.type);
 
     if (existing) {
       // 检查是否需要合并描述
@@ -292,10 +323,10 @@ ${articlesText}
 
       // 只在新旧描述都有内容且内容不同时才调用 LLM 合并
       if (existingDesc && newDesc && existingDesc !== newDesc) {
-        console.log(`[LLM] Merging descriptions for resource: ${input.name}`);
+        console.log(`[LLM] Merging descriptions for resource: ${normalizedName}`);
         try {
           const mergedDescription = await this.mergeResourceDescriptions(
-            input.name,
+            normalizedName,
             input.type,
             existingDesc,
             newDesc
@@ -311,11 +342,11 @@ ${articlesText}
       cacheService.incrementResourceMentionCount(existing.id);
 
       // 更新其他字段（URL、GitHub URL、tags）
-      return cacheService.addOrUpdateResource(input);
+      return cacheService.addOrUpdateResource(normalizedInput);
     }
 
     // 资源不存在，直接创建
-    return cacheService.addOrUpdateResource(input);
+    return cacheService.addOrUpdateResource(normalizedInput);
   }
 
   async summarizeArticle(article: Article): Promise<string> {
@@ -379,6 +410,31 @@ ${truncatedContent}
     }
   ]
 }
+
+## 内容完整性处理
+
+如果文章内容不完整（只有标题或很短的摘要）：
+1. 基于标题和已有信息推断文章主题
+2. 生成一个简短的推测性摘要，格式为："[基于标题] + 推测内容"
+3. keyPoints 可以为空数组
+4. resources 只提取能从标题明确识别的资源
+5. 不要生成"无法提取"或"内容不完整"这类无效摘要
+
+## 资源提取规范
+
+1. **名称标准化**：
+   - 使用资源的官方/标准名称
+   - 不要添加公司名后缀（用 "Claude" 而非 "Claude (Anthropic)"）
+   - 不要添加版本号到名称中（版本信息放在描述里）
+
+2. **过滤规则**：
+   - 不要将文章来源链接作为资源
+   - 不要提取通用概念（如 "AI"、"机器学习"）
+   - 只提取具体的工具、库、框架、项目、服务
+
+3. **去重原则**：
+   - 同一资源只提取一次
+   - 如果不确定是否为同一资源，宁可不提取
 
 文章标签说明（articleTags）：
 - 提取3-8个能代表文章主题的标签

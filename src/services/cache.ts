@@ -724,6 +724,20 @@ export class CacheService {
     return this.getResourcesByTag(tag.id, limit);
   }
 
+  // Reset operations
+  resetData(): void {
+    const sqlite = getSqlite();
+    sqlite.exec(`
+      DELETE FROM article_tags;
+      DELETE FROM article_resources;
+      DELETE FROM resource_tags;
+      DELETE FROM articles;
+      DELETE FROM tags;
+      DELETE FROM resources;
+      DELETE FROM user_preferences;
+    `);
+  }
+
   // Snapshot operations
   saveArticleSnapshot(articleId: number, textContent: string): void {
     const db = getDb();

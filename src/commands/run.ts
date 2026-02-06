@@ -5,6 +5,7 @@ import PQueue from "p-queue";
 import { rssService } from "../services/rss.js";
 import { llmService, type ProgressCallback, type TokenUsage } from "../services/llm.js";
 import { cacheService } from "../services/cache.js";
+import { scraperService } from "../services/scraper.js";
 import { exportAnalyzedArticles, EXPORTS_DIR } from "../services/export.js";
 import { logger } from "../utils/logger.js";
 import type { Article } from "../models/article.js";
@@ -14,6 +15,18 @@ import type { Feed } from "../models/feed.js";
 const RSS_CONCURRENCY = 5;  // RSS 采集并发数
 const LLM_CONCURRENCY = 1;  // LLM 分析并发数（API 通常有速率限制）
 
+// 检测内容是否需要抓取正文
+function needsScraping(content: string | null | undefined): boolean {
+  if (!content) return true;
+  const plainText = content.replace(/<[^>]*>/g, '').trim();
+  // 内容过短（<200字）或为占位符
+  if (plainText.length < 200) return true;
+  // 常见占位符
+  const placeholders = ['comments', 'read more', '阅读更多', '查看原文'];
+  const lowerText = plainText.toLowerCase();
+  return placeholders.some(p => lowerText === p || lowerText.startsWith(p + ' '));
+}
+
 export function createRunCommand(): Command {
   const run = new Command("run")
     .description("更新订阅源、分析文章并显示有趣的内容")
@@ -22,6 +35,7 @@ export function createRunCommand(): Command {
     .option("-f, --force", "强制重新分析所有文章（忽略之前的分析结果）")
     .option("--skip-update", "跳过订阅源更新")
     .option("--skip-analyze", "跳过 LLM 分析")
+    .option("--skip-scrape", "跳过正文抓取")
     .option("--json", "Output as JSON")
     .option("--rss-concurrency <n>", "RSS 采集并发数", String(RSS_CONCURRENCY))
     .option("--llm-concurrency <n>", "LLM 分析并发数", String(LLM_CONCURRENCY))
@@ -124,7 +138,28 @@ export function createRunCommand(): Command {
               }
             }
 
-            // Step 2: 将文章加入 LLM 队列
+            // Step 2.5: 对内容不完整的文章抓取正文
+            if (newArticles.length > 0 && !options.skipScrape) {
+              const articlesToScrape = newArticles.filter(
+                a => a.link && !a.text_snapshot && needsScraping(a.content)
+              );
+
+              if (articlesToScrape.length > 0) {
+                for (const article of articlesToScrape) {
+                  try {
+                    const scraped = await scraperService.fetchArticleContent(article.link!);
+                    if (scraped?.textContent) {
+                      cacheService.saveArticleSnapshot(article.id, scraped.textContent);
+                      article.text_snapshot = scraped.textContent;
+                    }
+                  } catch (err) {
+                    // 抓取失败不影响后续流程
+                  }
+                }
+              }
+            }
+
+            // Step 3: 将文章加入 LLM 队列
             if (newArticles.length > 0 && !options.skipAnalyze && hasLlmKey) {
               llmTotalArticles += newArticles.length;
               llmPendingFeeds++;
@@ -187,6 +222,8 @@ export function createRunCommand(): Command {
           }
         } finally {
           clearInterval(timer);
+          // 关闭 scraper 浏览器
+          await scraperService.close();
         }
 
         // 完成信息

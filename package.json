@@ -25,6 +25,7 @@
   "author": "smile",
   "license": "ISC",
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "better-sqlite3": "^11.0.0",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
@@ -32,15 +33,20 @@
     "drizzle-orm": "^0.45.1",
     "html-to-text": "^9.0.5",
     "https-proxy-agent": "^7.0.0",
+    "jsdom": "^28.0.0",
     "node-fetch": "^3.3.0",
     "openai": "^6.17.0",
     "ora": "^8.0.0",
     "p-queue": "^9.1.0",
+    "puppeteer": "^24.37.1",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "rss-parser": "^3.13.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.0.0",
     "@types/html-to-text": "^9.0.4",
+    "@types/jsdom": "^27.0.0",
     "@types/node": "^20.0.0",
     "drizzle-kit": "^0.31.8",
     "tsx": "^4.0.0",
