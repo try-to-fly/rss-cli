@@ -105,7 +105,20 @@ export function createReportListCommand(): Command {
     .option('--path <name>', '输出指定报告的完整路径')
     .option('--json', '输出 JSON 格式')
     .option('--status', '显示 report-cron 的运行状态')
+    .option('--latest', '输出最新报告的内容')
     .action(async (options) => {
+      // Show latest report content
+      if (options.latest) {
+        const reports = getReportList(1);
+        if (reports.length === 0) {
+          console.log('暂无报告');
+          process.exit(0);
+        }
+        const content = readFileSync(reports[0].path, 'utf-8');
+        console.log(content);
+        return;
+      }
+
       // Show status
       if (options.status) {
         const state = loadState();
