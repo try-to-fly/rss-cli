@@ -15,16 +15,9 @@ import type { Feed } from "../models/feed.js";
 const RSS_CONCURRENCY = 5;  // RSS 采集并发数
 const LLM_CONCURRENCY = 1;  // LLM 分析并发数（API 通常有速率限制）
 
-// 检测内容是否需要抓取正文
-function needsScraping(content: string | null | undefined): boolean {
-  if (!content) return true;
-  const plainText = content.replace(/<[^>]*>/g, '').trim();
-  // 内容过短（<200字）或为占位符
-  if (plainText.length < 200) return true;
-  // 常见占位符
-  const placeholders = ['comments', 'read more', '阅读更多', '查看原文'];
-  const lowerText = plainText.toLowerCase();
-  return placeholders.some(p => lowerText === p || lowerText.startsWith(p + ' '));
+// 当前默认：尽量抓取每篇文章正文
+function needsScraping(): boolean {
+  return true;
 }
 
 export function createRunCommand(): Command {
@@ -141,7 +134,7 @@ export function createRunCommand(): Command {
             // Step 2.5: 对内容不完整的文章抓取正文
             if (newArticles.length > 0 && !options.skipScrape) {
               const articlesToScrape = newArticles.filter(
-                a => a.link && !a.text_snapshot && needsScraping(a.content)
+                a => a.link && needsScraping()
               );
 
               if (articlesToScrape.length > 0) {
