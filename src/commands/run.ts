@@ -320,58 +320,6 @@ export function createRunCommand(): Command {
           return;
         }
 
-        // Display interesting articles
-        console.log();
-        console.log(
-          chalk.bold.yellow(
-            "═══════════════════════════════════════════════════════════════",
-          ),
-        );
-        console.log(
-          chalk.bold.yellow(
-            "                     Interesting Articles                       ",
-          ),
-        );
-        console.log(
-          chalk.bold.yellow(
-            "═══════════════════════════════════════════════════════════════",
-          ),
-        );
-        console.log();
-
-        if (interestingArticles.length === 0) {
-          logger.info("No interesting articles found");
-          return;
-        }
-
-        for (const article of interestingArticles) {
-          const date = article.pub_date
-            ? new Date(article.pub_date).toLocaleDateString()
-            : "Unknown";
-
-          console.log(chalk.green("►") + " " + chalk.bold(article.title));
-          console.log(
-            `  ${chalk.dim(`[${article.feed_name}]`)} ${chalk.dim(date)}`,
-          );
-
-          if (article.link) {
-            console.log(`  ${chalk.blue(article.link)}`);
-          }
-
-          if (article.interest_reason) {
-            console.log(
-              `  ${chalk.yellow("为什么有趣:")} ${article.interest_reason}`,
-            );
-          }
-
-          if (article.summary) {
-            console.log(`  ${chalk.cyan("摘要:")} ${article.summary}`);
-          }
-
-          console.log();
-        }
-
-        console.log(chalk.dim(`共 ${interestingArticles.length} 篇有趣的文章`));
       } catch (error) {
         if (options.json) {
           console.log(JSON.stringify({ error: (error as Error).message }));

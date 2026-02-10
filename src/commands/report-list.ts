@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'fs';
 import { join, basename } from 'path';
 import { execSync } from 'child_process';
 import chalk from 'chalk';
@@ -10,6 +10,7 @@ import {
   type ReportCronState,
   type ReportHistoryItem,
 } from './report-cron.js';
+import { generateReportData, generateMarkdown, formatDate } from './report.js';
 
 interface ReportInfo {
   name: string;
@@ -107,15 +108,20 @@ export function createReportListCommand(): Command {
     .option('--status', '显示 report-cron 的运行状态')
     .option('--latest', '输出最新报告的内容')
     .action(async (options) => {
-      // Show latest report content
+      // Show latest report content (generate day report in real-time)
       if (options.latest) {
-        const reports = getReportList(1);
-        if (reports.length === 0) {
-          console.log('暂无报告');
-          process.exit(0);
+        const { data } = await generateReportData({ days: 1 });
+        const content = generateMarkdown(data);
+        if (content) {
+          // Save to reports directory
+          if (!existsSync(REPORTS_DIR)) {
+            mkdirSync(REPORTS_DIR, { recursive: true });
+          }
+          const fileName = `${formatDate(new Date())}_day.md`;
+          const filePath = join(REPORTS_DIR, fileName);
+          writeFileSync(filePath, content, 'utf-8');
+          console.log(content);
         }
-        const content = readFileSync(reports[0].path, 'utf-8');
-        console.log(content);
         return;
       }
 
