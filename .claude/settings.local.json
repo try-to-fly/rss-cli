@@ -9,7 +9,8 @@
       "Bash(pnpm tsc:*)",
       "Bash(tree:*)",
       "Bash(sqlite3:*)",
-      "Bash(xxd:*)"
+      "Bash(xxd:*)",
+      "Bash(ls:*)"
     ]
   }
 }

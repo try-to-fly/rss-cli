@@ -617,7 +617,11 @@ ${truncatedContent}
           }
 
           // Save resources to database with smart description merging
+          // 只保存 main 类型的资源，过滤掉 mentioned 和 compared 类型以减少噪音
           for (const res of result.resources) {
+            if (res.relevance !== 'main') {
+              continue;
+            }
             const savedResource = await this.addOrUpdateResourceWithMerge({
               name: res.name,
               type: res.type,
@@ -679,26 +683,31 @@ ${truncatedContent}
       `[${i + 1}] 标题: ${a.title}\n来源: ${a.feed_name}\n摘要: ${(a.summary || '').slice(0, 300)}\n链接: ${a.link || '无'}`
     ).join('\n\n');
 
-    const prompt = `你是一个技术信息提炼专家。以下是最近 ${days} 天的 ${articles.length} 篇精选技术文章的标题和摘要。
+    const prompt = `你是一个技术信息提炼专家。以下是最近 ${days} 天的 ${articles.length} 篇精选技术文章。
 
-请完成两个任务：
+## 文章分类
 
-## 任务一：提炼知识点（15-20 条）
+请先识别每篇文章的类型：
+1. **周刊/Newsletter 类**：汇总多个项目/工具/新闻，应拆解为多个独立知识点
+2. **深度分析类**：详细讲解一个技术主题，应作为一个整体知识点概括
 
-从所有文章中提炼出最有价值的知识点，要求：
-1. 每条知识点一句话，不超过 40 个字
-2. 包含具体信息（技术名称、版本号、关键特性等）
-3. 跨文章去重合并——如果多篇文章讨论同一话题，只保留一条
-4. 不标注来源文章
-5. 周刊/Newsletter 类文章中的多个知识点应拆解为独立条目
+## 任务一：提炼知识点（10-15 条）
+
+要求：
+1. 每条知识点一句话，不超过 40 字
+2. **周刊类文章**：拆解其中的独立项目/工具为单独知识点
+3. **深度分析类文章**：整篇文章概括为一条知识点，突出核心观点
+4. 跨文章去重——同一话题只保留一条（如多篇都提到 OpenClaw，合并为一条）
+5. 包含具体信息（技术名称、版本号、关键特性）
 6. 按重要性排序
 
-## 任务二：挑选值得关注的项目/工具（3-8 个）
+## 任务二：挑选值得关注的项目/工具（3-5 个）
 
-从文章中挑选值得关注的具体项目、工具或库，要求：
-1. 必须是具体的项目/工具/库，不是概念或趋势
-2. 每个包含：名称、一句话描述（不超过 30 字）、链接（从文章中提取）
-3. 优先选择新发布或有重大更新的项目
+要求：
+1. 必须是具体的项目/工具/库
+2. 优先选择**新发布**或**有重大更新**的
+3. 避免选择通用工具（如 GitHub、Node.js、VS Code）
+4. 每个包含：名称、一句话描述（≤30字）、链接
 
 ## 文章列表
 
@@ -709,16 +718,14 @@ ${articleSummaries}
 返回 JSON：
 {
   "points": [
-    { "text": "知识点一句话（<=40字）", "url": "原文链接（从文章中挑一个最相关的）" },
-    ...
+    { "text": "知识点（<=40字）", "url": "原文链接" }
   ],
   "highlights": [
-    { "name": "项目名", "desc": "一句话描述", "url": "链接" },
-    ...
+    { "name": "项目名", "desc": "一句话描述", "url": "链接" }
   ]
 }
 
-只返回 JSON，不要其他内容。`;
+只返回 JSON。`;
 
     try {
       const content = await this.chatCompletion([{ role: 'user', content: prompt }]);
