@@ -43,6 +43,11 @@ export function getTrend(count: number): string {
 }
 
 export function generateMarkdown(data: ReportData): string {
+  // 如果没有实质内容（知识点和亮点都为空），返回空字符串
+  if (data.knowledgePoints.length === 0 && data.highlights.length === 0) {
+    return '';
+  }
+
   const lines: string[] = [];
 
   // Header
