@@ -802,6 +802,58 @@ ${articlesText}
 
     return result;
   }
+
+  async generateKnowledgePointsFromResources(
+    resources: { name: string; type: string; description: string | null; url: string | null; github_url: string | null }[],
+    days: number
+  ): Promise<{ points: { text: string; url?: string }[] }> {
+    const resourceSummaries = resources.map((r, i) =>
+      `[${i + 1}] ${r.name} (${r.type}): ${r.description || '无描述'}\n链接: ${r.url || r.github_url || '无'}`
+    ).join('\n\n');
+
+    const prompt = `你是一个技术信息提炼专家。以下是最近 ${days} 天发现的 ${resources.length} 个技术资源。
+
+## 任务：提炼要点（5-10 条）
+
+要求：
+1. 每条要点一句话，不超过 40 字
+2. 突出资源的核心价值和用途
+3. 按重要性/实用性排序
+4. 包含具体信息（技术名称、关键特性）
+
+## 资源列表
+
+${resourceSummaries}
+
+## 输出格式
+
+返回 JSON：
+{
+  "points": [
+    { "text": "要点（<=40字）", "url": "资源链接" }
+  ]
+}
+
+只返回 JSON。`;
+
+    try {
+      const content = await this.chatCompletion([{ role: 'user', content: prompt }]);
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error('[LLM] No JSON found in resource knowledge points response');
+        return { points: [] };
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        points: { text: string; url?: string }[];
+      };
+
+      return { points: parsed.points || [] };
+    } catch (error) {
+      console.error('[LLM] Failed to parse resource knowledge points JSON:', (error as Error).message);
+      return { points: [] };
+    }
+  }
 }
 
 export const llmService = new LlmService();

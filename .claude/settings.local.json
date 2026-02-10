@@ -17,7 +17,8 @@
       "Bash(rss show:*)",
       "Bash(openclaw cron get:*)",
       "Bash(openclaw cron list:*)",
-      "Bash(openclaw cron:*)"
+      "Bash(openclaw cron:*)",
+      "Bash(npm run build:*)"
     ]
   }
 }

@@ -3,7 +3,6 @@ import { writeFileSync } from 'fs';
 import chalk from 'chalk';
 import ora from 'ora';
 import { cacheService } from '../services/cache.js';
-import { llmService } from '../services/llm.js';
 import type { ArticleWithFeed } from '../models/article.js';
 import { getSqlite } from '../db/index.js';
 
@@ -19,7 +18,7 @@ export interface ResourceInsight {
   description: string | null;
   url: string | null;
   github_url: string | null;
-  articles: { title: string; context: string }[];
+  articles: { title: string; context: string; link: string | null }[];
 }
 
 export interface ReportData {
@@ -43,8 +42,8 @@ export function getTrend(count: number): string {
 }
 
 export function generateMarkdown(data: ReportData): string {
-  // 如果没有实质内容（知识点和亮点都为空），返回空字符串
-  if (data.knowledgePoints.length === 0 && data.highlights.length === 0) {
+  // 以 resourceInsights 为核心判断
+  if (data.resourceInsights.length === 0) {
     return '';
   }
 
@@ -53,38 +52,41 @@ export function generateMarkdown(data: ReportData): string {
   // Header
   const totalArticles = cacheService.getArticles({ days: data.period.days, limit: 10000 }).length;
   lines.push('# RSS 技术速览');
-  lines.push(`> ${data.period.start} ~ ${data.period.end} | 精选 ${data.articles.length} 篇 / 共 ${totalArticles} 篇`);
+  lines.push(`> ${data.period.start} ~ ${data.period.end} | ${data.resourceInsights.length} 个资源 / ${totalArticles} 篇文章`);
   lines.push('');
 
-  // 要点速览
-  if (data.knowledgePoints.length > 0) {
-    lines.push('## 要点速览');
-    for (const point of data.knowledgePoints) {
-      if (typeof point === 'string') {
-        lines.push(`- ${point}`);
-      } else {
-        const link = point.url ? `[${point.text}](${point.url})` : point.text;
-        lines.push(`- ${link}`);
-      }
-    }
-    lines.push('');
+  // 资源列表（使用第一篇文章的链接）
+  lines.push('## 资源列表');
+  for (const r of data.resourceInsights) {
+    const articleLink = r.articles[0]?.link;
+    const nameWithLink = articleLink ? `[${r.name}](${articleLink})` : r.name;
+    lines.push(`- **${nameWithLink}** (${r.type}): ${r.description || '无描述'}`);
   }
+  lines.push('');
 
-  // 值得关注
-  if (data.highlights.length > 0) {
-    lines.push('## 值得关注');
-    for (const h of data.highlights) {
-      const link = h.url ? ` [链接](${h.url})` : '';
-      lines.push(`- **${h.name}**: ${h.desc}${link}`);
-    }
-    lines.push('');
-  }
-
-  // 趋势（内联格式）
+  // 趋势
   if (data.tags.length > 0) {
     lines.push('## 趋势');
     const tagLine = data.tags.slice(0, 10).map(t => `${t.name}(${t.count})`).join(' | ');
     lines.push(`**热门**: ${tagLine}`);
+    lines.push('');
+  }
+
+  // 参考资料（所有引用的文章）
+  const allArticles = new Map<string, { title: string; link: string }>();
+  for (const r of data.resourceInsights) {
+    for (const a of r.articles) {
+      if (a.link && !allArticles.has(a.link)) {
+        allArticles.set(a.link, { title: a.title, link: a.link });
+      }
+    }
+  }
+
+  if (allArticles.size > 0) {
+    lines.push('## 参考资料');
+    for (const { title, link } of allArticles.values()) {
+      lines.push(`- [${title}](${link})`);
+    }
     lines.push('');
   }
 
@@ -113,8 +115,8 @@ export function getFeedStats(days: number): ReportData['feedStats'] {
 export function getResourceInsights(days: number): ResourceInsight[] {
   const hotResources = cacheService.getHotResources({ days, limit: 20 });
 
-  // 筛选条件：relevance = 'main' 且 source_count >= 2
-  const qualifiedResources = hotResources.filter(r => r.source_count >= 2);
+  // 筛选条件：relevance = 'main' 且 source_count >= 1
+  const qualifiedResources = hotResources.filter(r => r.source_count >= 1);
 
   const insights: ResourceInsight[] = [];
   const sqlite = getSqlite();
@@ -122,7 +124,7 @@ export function getResourceInsights(days: number): ResourceInsight[] {
   for (const resource of qualifiedResources.slice(0, 10)) {
     // 查询关联的文章和 context
     const query = `
-      SELECT a.title, ar.context
+      SELECT a.title, a.link, ar.context
       FROM article_resources ar
       JOIN articles a ON ar.article_id = a.id
       WHERE ar.resource_id = ? AND ar.relevance = 'main'
@@ -130,7 +132,7 @@ export function getResourceInsights(days: number): ResourceInsight[] {
       LIMIT 5
     `;
 
-    const rows = sqlite.prepare(query).all(resource.id) as { title: string; context: string | null }[];
+    const rows = sqlite.prepare(query).all(resource.id) as { title: string; link: string | null; context: string | null }[];
 
     if (rows.length > 0) {
       insights.push({
@@ -139,7 +141,7 @@ export function getResourceInsights(days: number): ResourceInsight[] {
         description: resource.description,
         url: resource.url,
         github_url: resource.github_url,
-        articles: rows.map(r => ({ title: r.title, context: r.context || '' })),
+        articles: rows.map(r => ({ title: r.title, context: r.context || '', link: r.link })),
       });
     }
   }
@@ -163,7 +165,6 @@ export async function generateReportData(options: GenerateReportOptions): Promis
   const startDate = new Date(endDate.getTime() - days * 24 * 60 * 60 * 1000);
 
   const articles = cacheService.getArticles({ interesting: true, days, limit: 100 });
-  const hotResources = includeResources ? cacheService.getHotResources({ days, limit: 20 }) : [];
   const allTags = cacheService.getTagsWithCounts();
   const feedStats = getFeedStats(days);
 
@@ -176,26 +177,13 @@ export async function generateReportData(options: GenerateReportOptions): Promis
       trend: getTrend(t.article_count),
     }));
 
-  onProgress?.('Generating knowledge points with LLM...');
-  let knowledgePoints: ({ text: string; url?: string } | string)[] = [];
-  let highlights: { name: string; desc: string; url?: string }[] = [];
-  const hasLlmKey = process.env.OPENAI_API_KEY;
-
-  if (hasLlmKey && articles.length > 0) {
-    try {
-      const result = await llmService.generateKnowledgePoints(articles, days);
-      knowledgePoints = result.points;
-      highlights = result.highlights;
-    } catch (err) {
-      console.error('LLM error:', (err as Error).message);
-      knowledgePoints = [`本期共收录 ${articles.length} 篇精选文章，涵盖 ${tags.length} 个技术话题。`];
-    }
-  } else if (articles.length > 0) {
-    knowledgePoints = [`本期共收录 ${articles.length} 篇精选文章，涵盖 ${tags.length} 个技术话题。`];
-  }
-
+  // 获取 resourceInsights
   onProgress?.('Extracting resource insights...');
   const resourceInsights = includeResources ? getResourceInsights(days) : [];
+
+  // 不再使用 LLM 生成要点速览
+  const knowledgePoints: ({ text: string; url?: string } | string)[] = [];
+  const highlights: { name: string; desc: string; url?: string }[] = [];
 
   const data: ReportData = {
     period: { start: formatDate(startDate), end: formatDate(endDate), days },
